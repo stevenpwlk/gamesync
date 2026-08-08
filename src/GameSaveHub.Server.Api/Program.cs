@@ -513,6 +513,13 @@ protectedApi.MapPost("/uploads/{id:guid}/commit", async (Guid id, GameSaveHubDbC
     session.ReleasedAtUtc = now;
     await db.SaveChangesAsync(cancellationToken);
     await transaction.CommitAsync(cancellationToken);
+
+    // Publication définitivement acquise : les chunks ne servent plus. Les conserver
+    // laissait dans pending/ une copie intégrale de la sauvegarde à chaque transfert.
+    // Le nettoyage vient après le commit, jamais avant : un commit rejoué doit pouvoir
+    // réassembler l'artefact depuis ces mêmes chunks.
+    store.TryCleanupPending(upload.Id);
+
     return Results.Ok(new CommitUploadResponse(version.Id, version.Sha256, version.Length));
 });
 

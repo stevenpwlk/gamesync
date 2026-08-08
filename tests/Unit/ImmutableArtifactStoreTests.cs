@@ -22,6 +22,45 @@ public sealed class ImmutableArtifactStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task CleanupRemovesPendingChunksOfAnUpload()
+    {
+        var store = CreateStore();
+        var uploadId = Guid.NewGuid();
+        await store.PutChunkAsync(uploadId, 0, new MemoryStream([1, 2, 3]), 3, CancellationToken.None);
+        var chunk = store.GetChunkPath(uploadId, 0);
+        Assert.True(File.Exists(chunk));
+
+        store.TryCleanupPending(uploadId);
+
+        Assert.False(File.Exists(chunk));
+        Assert.False(Directory.Exists(Path.GetDirectoryName(chunk)!));
+    }
+
+    [Fact]
+    public void CleanupOfAnUnknownUploadIsHarmless()
+    {
+        var store = CreateStore();
+
+        // Un commit rejoué après nettoyage ne doit pas faire échouer la publication.
+        store.TryCleanupPending(Guid.NewGuid());
+    }
+
+    [Fact]
+    public async Task CleanupLeavesOtherUploadsIntact()
+    {
+        var store = CreateStore();
+        var kept = Guid.NewGuid();
+        var removed = Guid.NewGuid();
+        await store.PutChunkAsync(kept, 0, new MemoryStream([1, 2, 3]), 3, CancellationToken.None);
+        await store.PutChunkAsync(removed, 0, new MemoryStream([4, 5, 6]), 3, CancellationToken.None);
+
+        store.TryCleanupPending(removed);
+
+        Assert.True(File.Exists(store.GetChunkPath(kept, 0)));
+        Assert.False(File.Exists(store.GetChunkPath(removed, 0)));
+    }
+
+    [Fact]
     public async Task ChunkWriteRejectsDifferentDuplicate()
     {
         var store = CreateStore();

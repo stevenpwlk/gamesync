@@ -58,7 +58,10 @@ public partial class MainWindow : Window
     private async void SessionTimer_Tick(object? sender, EventArgs e)
     {
         if (_busyDepth > 0) return;
-        await GuardAsync(RefreshTransferAsync);
+
+        // Rafraîchissement de fond : surtout pas d'indicateur d'activité. Le faire
+        // apparaître toutes les 2 secondes faisait sautiller toute la page.
+        await GuardAsync(RefreshTransferAsync, showBusy: false);
     }
 
     private async void Enroll_Click(object sender, RoutedEventArgs e) => await GuardAsync(async () =>
@@ -573,9 +576,9 @@ public partial class MainWindow : Window
     /// exception non filtrée ferme l'application sans message — y compris en pleine
     /// session de transfert.
     /// </summary>
-    private async Task GuardAsync(Func<Task> operation)
+    private async Task GuardAsync(Func<Task> operation, bool showBusy = true)
     {
-        SetBusy(true);
+        if (showBusy) SetBusy(true);
         try
         {
             await operation();
@@ -595,7 +598,7 @@ public partial class MainWindow : Window
         }
         finally
         {
-            SetBusy(false);
+            if (showBusy) SetBusy(false);
         }
     }
 
@@ -604,7 +607,7 @@ public partial class MainWindow : Window
         _busyDepth = Math.Max(0, busy ? _busyDepth + 1 : _busyDepth - 1);
         var active = _busyDepth > 0;
 
-        BusyBar.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        BusyBar.Opacity = active ? 1 : 0;
         Cursor = active ? System.Windows.Input.Cursors.Wait : null;
 
         if (active)

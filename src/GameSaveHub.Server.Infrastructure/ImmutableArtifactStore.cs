@@ -136,5 +136,28 @@ public sealed class ImmutableArtifactStore(IOptions<StorageOptions> options)
         return destination;
     }
 
+    /// <summary>
+    /// Supprime les chunks d'un upload une fois la publication définitivement acquise.
+    /// </summary>
+    /// <remarks>
+    /// À n'appeler qu'<b>après</b> la validation de la transaction SQLite. Tant qu'elle
+    /// n'est pas confirmée, un commit rejoué doit pouvoir réassembler l'artefact depuis
+    /// ces chunks : les effacer plus tôt rendrait la reprise impossible.
+    /// L'échec du nettoyage n'est jamais remonté — la version publiée est valide, et
+    /// laisser un résidu vaut mieux que faire échouer une publication réussie.
+    /// </remarks>
+    public void TryCleanupPending(Guid uploadId)
+    {
+        try
+        {
+            var directory = GetPendingDirectory(uploadId);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Résidu conservé : sans conséquence sur la version publiée.
+        }
+    }
+
     private string GetRoot() => Path.GetFullPath(_options.Root);
 }

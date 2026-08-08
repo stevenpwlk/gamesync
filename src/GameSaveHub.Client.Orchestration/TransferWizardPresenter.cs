@@ -116,7 +116,9 @@ public static class TransferWizardPresenter
                 "Import en cours",
                 "Ne lancez pas le jeu et ne fermez pas l'application tant que cette étape n'est pas terminée.",
                 NoSteps,
-                session.PlaceholderName,
+                // Le nom du monde a été recopié, il n'a plus d'utilité : l'afficher encore
+                // laisse croire qu'une action est attendue alors qu'il faut justement ne rien faire.
+                null,
                 detail,
                 null,
                 false,

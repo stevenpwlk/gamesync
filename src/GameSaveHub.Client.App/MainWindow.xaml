@@ -41,8 +41,10 @@
       </StackPanel>
     </Grid>
 
+    <!-- Toujours présente, seule l'opacité change : la faire apparaître et disparaître
+         décalerait verticalement toute la page à chaque rafraîchissement. -->
     <ProgressBar x:Name="BusyBar" Grid.Row="1" Margin="0,16,0,0"
-                 IsIndeterminate="True" Visibility="Collapsed" />
+                 IsIndeterminate="True" Opacity="0" />
 
     <!-- == Bandeau d'état == -->
     <Border Grid.Row="2" Margin="0,16,0,20" Padding="20,15"
