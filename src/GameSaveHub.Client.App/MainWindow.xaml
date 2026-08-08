@@ -1,10 +1,11 @@
 <Window x:Class="GameSaveHub.Client.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="GameSave Hub — Phase 3" Height="720" Width="1040" MinHeight="650" MinWidth="900"
+        Title="GameSave Hub" Height="760" Width="1080" MinHeight="680" MinWidth="920"
         WindowStartupLocation="CenterScreen" Background="#10151B" Foreground="#F3F5F7">
   <Grid Margin="28">
     <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
@@ -14,17 +15,23 @@
     <DockPanel>
       <StackPanel DockPanel.Dock="Left">
         <TextBlock Text="GameSave Hub" FontSize="32" FontWeight="SemiBold" />
-        <TextBlock Text="The Planet Crafter — client intégré Phase 3" Foreground="#AEB8C5" Margin="0,4,0,0" />
+        <TextBlock Text="The Planet Crafter — partage de sauvegarde" Foreground="#AEB8C5" Margin="0,4,0,0" />
       </StackPanel>
       <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
-        <Border Background="#3A2D1B" Padding="10,5" CornerRadius="5" HorizontalAlignment="Right">
-          <TextBlock Text="PRÉFLIGHT — ÉCRITURE WGS DÉSACTIVÉE" Foreground="#FFD28C" FontWeight="SemiBold" />
+        <Border x:Name="GateBadge" Background="#3A2D1B" Padding="10,5" CornerRadius="5" HorizontalAlignment="Right">
+          <TextBlock x:Name="GateBadgeText" Text="ÉCRITURE DES SAUVEGARDES DÉSACTIVÉE"
+                     Foreground="#FFD28C" FontWeight="SemiBold" />
         </Border>
-        <Button Content="Actualiser" Click="Refresh_Click" Padding="16,8" Margin="0,8,0,0" HorizontalAlignment="Right" />
+        <Button x:Name="RefreshButton" Content="Actualiser" Click="Refresh_Click"
+                Padding="16,8" Margin="0,8,0,0" HorizontalAlignment="Right" />
       </StackPanel>
     </DockPanel>
 
-    <Border Grid.Row="1" Margin="0,20,0,18" Padding="15" Background="#19212A" CornerRadius="6">
+    <ProgressBar x:Name="BusyBar" Grid.Row="1" Height="3" Margin="0,14,0,0"
+                 IsIndeterminate="True" Visibility="Collapsed"
+                 Background="Transparent" BorderThickness="0" Foreground="#7FB3D5" />
+
+    <Border Grid.Row="2" Margin="0,14,0,18" Padding="15" Background="#19212A" CornerRadius="6">
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*" />
@@ -46,12 +53,13 @@
       </Grid>
     </Border>
 
-    <Grid Grid.Row="2">
+    <Grid Grid.Row="3">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="0.9*" />
-        <ColumnDefinition Width="1.35*" />
+        <ColumnDefinition Width="0.85*" />
+        <ColumnDefinition Width="1.4*" />
       </Grid.ColumnDefinitions>
 
+      <!-- Colonne gauche : identité du PC -->
       <Border Margin="0,0,9,0" Padding="20" BorderBrush="#303B48" BorderThickness="1" CornerRadius="6">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
           <StackPanel>
@@ -64,7 +72,7 @@
 
             <TextBlock Text="Pseudo Planet Crafter" />
             <TextBox x:Name="PlayerProfileText" Margin="0,6,0,12" Padding="9" />
-            <TextBlock Text="Ce pseudo doit déjà exister dans chaque sauvegarde que vous voulez ouvrir. GameSave Hub refuse sinon le transfert."
+            <TextBlock Text="Ce pseudo doit déjà exister dans chaque sauvegarde que vous voulez ouvrir. GameSave Hub refuse sinon le transfert, pour ne jamais vous faire hériter du personnage de quelqu’un d’autre."
                        TextWrapping="Wrap" Foreground="#D8A16E" Margin="0,0,0,12" />
 
             <TextBlock Text="Code d’invitation" />
@@ -77,59 +85,110 @@
 
             <Separator Margin="0,16" />
             <TextBlock Text="Sécurité locale" FontSize="18" FontWeight="SemiBold" />
-            <TextBlock x:Name="LocalGateText"
-                       Text="Écriture WGS : désactivée"
-                       Foreground="#9FD3A8"
-                       Margin="0,8,0,0" />
-            <TextBlock Text="Cette version peut lister et vérifier les mondes du NAS mais ne peut pas démarrer un import WGS, même si le feature gate serveur était ouvert."
+            <TextBlock x:Name="LocalGateText" Text="Écriture WGS : désactivée" Foreground="#9FD3A8" Margin="0,8,0,0" />
+            <TextBlock x:Name="LocalGateHelpText"
+                       Text="Cette version peut lister et vérifier les mondes du NAS mais ne peut pas écrire dans vos sauvegardes."
                        TextWrapping="Wrap" Foreground="#AEB8C5" Margin="0,6,0,0" />
           </StackPanel>
         </ScrollViewer>
       </Border>
 
+      <!-- Colonne droite : assistant de transfert, puis catalogue -->
       <Border Grid.Column="1" Margin="9,0,0,0" Padding="20" BorderBrush="#303B48" BorderThickness="1" CornerRadius="6">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
           <StackPanel>
-            <DockPanel>
-              <TextBlock Text="Mondes sur le NAS" FontSize="21" FontWeight="SemiBold" DockPanel.Dock="Left" />
-              <Button Content="Charger la liste" Click="LoadWorlds_Click" Padding="12,7" DockPanel.Dock="Right" />
-            </DockPanel>
 
-            <TextBlock Text="Monde serveur" Margin="0,16,0,0" />
-            <ComboBox x:Name="WorldComboBox" Margin="0,6,0,12" Padding="8" DisplayMemberPath="Label" />
-
-            <WrapPanel>
-              <Button x:Name="PreviewButton" Content="Vérifier la compatibilité" Click="Preview_Click" Padding="14,9" Margin="0,0,8,8" />
-              <Button x:Name="TransferStartButton" Content="Démarrer le transfert" Click="TransferStart_Click" Padding="14,9" Margin="0,0,8,8" IsEnabled="False" />
-            </WrapPanel>
-
-            <Border Background="#19212A" Padding="14" CornerRadius="5" Margin="0,12,0,0">
+            <Border x:Name="WizardCard" Background="#19212A" Padding="18" CornerRadius="6"
+                    BorderBrush="#303B48" BorderThickness="1">
               <StackPanel>
-                <TextBlock Text="Préflight" FontWeight="SemiBold" />
-                <TextBlock x:Name="CompatibilityText" Text="Sélectionnez un monde puis lancez la vérification." TextWrapping="Wrap" Margin="0,7,0,0" />
+                <TextBlock x:Name="WizardTitle" Text="Aucun transfert en cours"
+                           FontSize="21" FontWeight="SemiBold" TextWrapping="Wrap" />
+                <TextBlock x:Name="WizardInstruction"
+                           Text="Sélectionnez un monde puis lancez la vérification de compatibilité."
+                           TextWrapping="Wrap" Foreground="#AEB8C5" Margin="0,8,0,0" />
+
+                <Border x:Name="PlaceholderCard" Visibility="Collapsed" Margin="0,14,0,0"
+                        Background="#0C1116" BorderBrush="#4A5B6E" BorderThickness="1"
+                        CornerRadius="5" Padding="14">
+                  <StackPanel>
+                    <TextBlock Text="NOM À RECOPIER EXACTEMENT DANS LE JEU"
+                               Foreground="#AEB8C5" FontSize="11" FontWeight="SemiBold" />
+                    <DockPanel Margin="0,8,0,0">
+                      <Button x:Name="CopyPlaceholderButton" DockPanel.Dock="Right" Content="Copier"
+                              Click="CopyPlaceholder_Click" Padding="14,7" VerticalAlignment="Center" />
+                      <TextBox x:Name="PlaceholderText" Text="—"
+                               FontFamily="Consolas" FontSize="24" FontWeight="Bold"
+                               Foreground="#FFD28C" Background="Transparent" BorderThickness="0"
+                               IsReadOnly="True" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock Text="Sans espace avant ni après. Une différence, même d’un caractère, fait échouer l’étape suivante."
+                               TextWrapping="Wrap" Foreground="#AEB8C5" FontSize="11" Margin="0,8,0,0" />
+                  </StackPanel>
+                </Border>
+
+                <ItemsControl x:Name="WizardSteps" Margin="0,14,0,0" Visibility="Collapsed">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <DockPanel Margin="0,0,0,6">
+                        <TextBlock Text="•" DockPanel.Dock="Left" Margin="0,0,8,0" Foreground="#7FB3D5" />
+                        <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+                      </DockPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <ProgressBar x:Name="WizardProgress" Height="3" Margin="0,14,0,0"
+                             IsIndeterminate="True" Visibility="Collapsed"
+                             Background="Transparent" BorderThickness="0" Foreground="#7FB3D5" />
+
+                <TextBlock x:Name="WizardDetail" Visibility="Collapsed" TextWrapping="Wrap"
+                           Foreground="#D8A16E" Margin="0,12,0,0" />
+
+                <WrapPanel Margin="0,16,0,0">
+                  <Button x:Name="WizardPrimaryButton" Content="Démarrer le transfert"
+                          Click="WizardPrimary_Click" Padding="18,10" Margin="0,0,8,0"
+                          FontWeight="SemiBold" Visibility="Collapsed" />
+                  <Button x:Name="WizardAbortButton" Content="Abandonner"
+                          Click="WizardAbort_Click" Padding="14,10" Visibility="Collapsed" />
+                </WrapPanel>
               </StackPanel>
             </Border>
 
-            <TextBlock Text="Joueurs présents dans la sauvegarde" FontWeight="SemiBold" Margin="0,16,0,6" />
-            <TextBlock x:Name="PlayersText" Text="—" TextWrapping="Wrap" Foreground="#AEB8C5" />
+            <StackPanel x:Name="CatalogPanel" Margin="0,20,0,0">
+              <DockPanel>
+                <TextBlock Text="Mondes sur le NAS" FontSize="21" FontWeight="SemiBold" DockPanel.Dock="Left" />
+                <Button x:Name="LoadWorldsButton" Content="Charger la liste" Click="LoadWorlds_Click"
+                        Padding="12,7" DockPanel.Dock="Right" />
+              </DockPanel>
 
-            <TextBlock Text="Détails du monde" FontWeight="SemiBold" Margin="0,16,0,6" />
-            <TextBlock x:Name="WorldDetailsText" Text="—" TextWrapping="Wrap" Foreground="#AEB8C5" />
+              <TextBlock Text="Monde serveur" Margin="0,16,0,0" />
+              <ComboBox x:Name="WorldComboBox" Margin="0,6,0,12" Padding="8"
+                        DisplayMemberPath="Label" SelectionChanged="WorldComboBox_SelectionChanged" />
 
-            <Separator Margin="0,18" />
-            <TextBlock Text="Orchestrateur" FontSize="18" FontWeight="SemiBold" />
-            <TextBlock x:Name="TransferStateText"
-                       Text="Aucune session locale active."
-                       TextWrapping="Wrap"
-                       Foreground="#AEB8C5"
-                       Margin="0,7,0,0" />
-            <TextBlock Text="Les boutons de jeu/import seront activés dans la phase suivante, après validation de l’installation persistante et du préflight."
-                       TextWrapping="Wrap" Foreground="#AEB8C5" Margin="0,7,0,0" />
+              <Button x:Name="PreviewButton" Content="Vérifier la compatibilité" Click="Preview_Click"
+                      Padding="14,9" HorizontalAlignment="Left" />
+
+              <Border Background="#19212A" Padding="14" CornerRadius="5" Margin="0,14,0,0">
+                <StackPanel>
+                  <TextBlock Text="Préflight" FontWeight="SemiBold" />
+                  <TextBlock x:Name="CompatibilityText"
+                             Text="Sélectionnez un monde puis lancez la vérification."
+                             TextWrapping="Wrap" Margin="0,7,0,0" />
+                </StackPanel>
+              </Border>
+
+              <TextBlock Text="Joueurs présents dans la sauvegarde" FontWeight="SemiBold" Margin="0,16,0,6" />
+              <TextBlock x:Name="PlayersText" Text="—" TextWrapping="Wrap" Foreground="#AEB8C5" />
+
+              <TextBlock Text="Détails du monde" FontWeight="SemiBold" Margin="0,16,0,6" />
+              <TextBlock x:Name="WorldDetailsText" Text="—" TextWrapping="Wrap" Foreground="#AEB8C5" />
+            </StackPanel>
+
           </StackPanel>
         </ScrollViewer>
       </Border>
     </Grid>
 
-    <TextBlock Grid.Row="3" x:Name="FeedbackText" Margin="0,18,0,0" Foreground="#AEB8C5" TextWrapping="Wrap" />
+    <TextBlock Grid.Row="4" x:Name="FeedbackText" Margin="0,18,0,0" Foreground="#AEB8C5" TextWrapping="Wrap" />
   </Grid>
 </Window>

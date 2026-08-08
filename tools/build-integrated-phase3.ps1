@@ -55,10 +55,12 @@ function Test-Phase3Guards {
         $inline += ([regex]::Matches($text, '\[InlineData')).Count
     }
     $cases = $facts + $inline
-    if ($cases -ne 70) {
-        throw "Nombre de cas de test inattendu : $cases (attendu : 70)."
+    # Plancher de non-regression : le nombre de cas peut augmenter, jamais diminuer.
+    $minimumCases = 70
+    if ($cases -lt $minimumCases) {
+        throw "Regression de couverture : $cases cas pour un plancher de $minimumCases."
     }
-    Write-Host "70 cas de test unitaires declares"
+    Write-Host "$cases cas de test unitaires declares (plancher $minimumCases)"
 
     $apiSettings = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Server.Api\appsettings.json') -Raw
     $portainer = Get-Content -LiteralPath (Join-Path $repo 'deploy\compose.portainer.yml') -Raw
@@ -141,14 +143,46 @@ function Test-Phase3Guards {
     }
 
     $clientMainWindow = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.App\MainWindow.xaml.cs') -Raw
-    if ($clientMainWindow -match 'GetInt64\(\)\.ToString\(\)') {
-        throw 'CA1305 : seed numerique sans culture explicite dans MainWindow.'
+    if ($clientMainWindow -match 'GetInt64\(\)\.ToString\(\)' -or $clientMainWindow -match 'GetInt32\(\)\.ToString\(\)') {
+        throw 'CA1305 : valeur numerique formatee sans culture explicite dans MainWindow.'
     }
-    if ($clientMainWindow -notmatch 'GetInt64\(\)\.ToString\(System\.Globalization\.CultureInfo\.InvariantCulture\)') {
-        throw 'Formatage invariant de la seed absent dans MainWindow.'
+    if ($clientMainWindow -notmatch 'CultureInfo\.InvariantCulture') {
+        throw 'Formatage invariant absent dans MainWindow.'
     }
 
-    Write-Host 'Installation Windows persistante, culture numerique et conventions analyseurs : valides'
+    # Regression constatee en Phase 3 : l'IHM ne cablait plus qu'une des six commandes de
+    # transfert, rendant impossible d'aller au bout d'un import. Le presentateur porte
+    # desormais ces commandes et l'ecran doit s'appuyer sur lui.
+    $presenterPath = Join-Path $repo 'src\GameSaveHub.Client.Orchestration\TransferWizardPresenter.cs'
+    if (-not (Test-Path -LiteralPath $presenterPath)) {
+        throw 'TransferWizardPresenter absent : l assistant de transfert ne peut pas etre rendu.'
+    }
+    $presenter = Get-Content -LiteralPath $presenterPath -Raw
+    foreach ($command in @(
+        'transfer-start',
+        'transfer-placeholder-ready',
+        'transfer-play-started',
+        'transfer-play-complete',
+        'transfer-resume',
+        'transfer-abort')) {
+        if ($presenter -notmatch [regex]::Escape($command)) {
+            throw "Commande de transfert absente de l assistant : $command"
+        }
+    }
+    if ($clientMainWindow -notmatch 'TransferWizardPresenter') {
+        throw 'MainWindow n utilise pas TransferWizardPresenter : les etapes de transfert ne seraient pas pilotables.'
+    }
+
+    # Une exception non geree dans un gestionnaire async void fermait l application sans message.
+    if ($clientMainWindow -notmatch 'GuardAsync') {
+        throw 'Gestionnaires IHM sans enveloppe de gestion d erreur.'
+    }
+    $appXaml = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.App\App.xaml') -Raw
+    if ($appXaml -notmatch 'DispatcherUnhandledException') {
+        throw 'Filet de securite global absent de App.xaml.'
+    }
+
+    Write-Host 'Assistant de transfert complet, gestion d erreur et culture numerique : valides'
 }
 
 Write-Host "`n=== GameSave Hub - Integrated Client Phase 3 / 0.3.0 r2 ===" -ForegroundColor Cyan

@@ -5,4 +5,9 @@
     <UseWPF>true</UseWPF>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Pour TransferStage / TransferSession / TransferWizardPresenter : l'écran est
+         un rendu de ce que décrit le présentateur, il ne réimplémente pas ses règles. -->
+    <ProjectReference Include="..\GameSaveHub.Client.Orchestration\GameSaveHub.Client.Orchestration.csproj" />
+  </ItemGroup>
 </Project>
