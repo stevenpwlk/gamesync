@@ -21,6 +21,7 @@ Sources analysées :
 | [04 — État du dépôt](04-ETAT-DU-DEPOT.md) | Inventaire fichier par fichier et les 12 anomalies constatées |
 | [05 — Reste à faire](05-RESTE-A-FAIRE.md) | Blocage actuel, jalons restants, critères go/no-go |
 | [06 — Plan de rangement](06-PLAN-DE-RANGEMENT.md) | Proposition de tri du dépôt, cible et séquence d'exécution |
+| [07 — Revue critique du code](07-REVUE-CRITIQUE.md) | Défauts vérifiés dans les sources et remises en question d'architecture |
 
 ---
 
