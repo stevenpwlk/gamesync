@@ -84,9 +84,48 @@ Un PC ne pourra prendre la main que si son pseudo configuré correspond exacteme
 
 Aucune écriture WGS n'est possible. Le palier D s'exécute intégralement dans cet état.
 
-## Reste à faire
+### Palier D — client réel sur PC-STEVEN ✅
 
-**Palier D** — installation du client Windows sur `PC-STEVEN`, enrôlement, affichage du catalogue, aperçu des trois joueurs, préflight `preflight_ready` avec `Stevenpwlk`, puis test négatif avec un pseudo inexistant (`player_not_found`). Aucune écriture WGS.
+Validé le 8 août. Deux défauts bloquants ont dû être corrigés avant d'y arriver, tous deux invisibles hors exécution réelle — voir [la revue critique](../etat-des-lieux-2026-08-08/07-REVUE-CRITIQUE.md).
+
+| Contrôle | Résultat |
+|---|---|
+| Service `GameSaveHubClient` | `Running`, démarrage automatique |
+| SID joueur résolu | `S-1-5-21-…-1001`, `AppData` correct |
+| Service local / Serveur NAS | `Connecté` / `Healthy` |
+| Catalogue | `Shlags1 — Available` |
+| Joueurs affichés | `Stevenpwlk` ID 0 hôte, `Maxdrake59` ID 4, `BoB XiMe` ID 7 |
+| Préflight `Stevenpwlk` | ✅ compatible |
+| Préflight pseudo inexistant | ✅ `player_not_found`, transfert bloqué |
+| Bouton de transfert | absent — verrou local fermé |
+| Écriture WGS | aucune |
+
+L'installateur en un clic `INSTALLER-GAMESAVEHUB.cmd` a été validé de bout en bout, élévation UAC comprise. C'est celui que recevra le second PC.
+
+### Sauvegardes
+
+```text
+/Volume2/gamesavehub/backups/
+  pre-api-0.3.0-20260808/            point de retour de la bascule d'image
+  2026-08-08-avant-phase4/           complet, relu et vérifié exploitable
+  2026-08-09-avant-ouverture-verrous/ complet
+```
+
+Les deux dernières contiennent `gamesavehub.db` **et** `objects/`. Leur base a été relue avec l'outil d'administration sur copie temporaire : `Shlags1` et sa version y figurent bien. `pre-api-0.2.0-20260807` a été supprimée, superflue.
+
+**L'arrêt de l'API pendant la copie n'est pas optionnel** : le 8 août, `gamesavehub.db` datait d'avant la création de `Shlags1`, tout le travail résidant dans le `-wal`. Une copie à chaud aurait produit une sauvegarde silencieusement amputée.
+
+### Filet de sécurité côté NAS
+
+La version initiale est sanctuarisée contre la rétention :
+
+```text
+version protect 32a23472-6ef2-41e9-8c29-10e7e2046255
+```
+
+En cas de publication ratée, le retour se fait par `world restore <worldId> <versionId> <justification>`, qui revérifie l'empreinte de l'objet immuable et refuse si le monde est verrouillé. Les versions étant immuables et additives, une mauvaise capture n'écrase jamais la précédente.
+
+## Reste à faire
 
 **Phase 4** — ouverture des deux verrous pour le pilote `Steven ↔ Bob`, puis les preuves manquantes du [GO-NOGO](../operations/GO-NOGO.md) : deux cycles `A → B → A` reproductibles, un cycle avec redémarrage Windows, une interruption volontaire pendant l'envoi, et la conduite à tenir face à un dialogue Xbox Local/Cloud.
 
