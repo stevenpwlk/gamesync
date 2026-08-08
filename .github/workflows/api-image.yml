@@ -1,0 +1,150 @@
+name: API image
+
+# Construit et publie l'image de l'API GameSave Hub sur GHCR.
+#
+# Cette chaîne remplace le build « Upload a tar » de Portainer, qui échouait sans
+# aucun log exploitable. Le contexte Docker est produit par Git et filtré par le
+# .dockerignore racine : il ne peut plus embarquer bin/ ni obj/.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'global.json'
+      - 'Directory.Build.props'
+      - 'GameSaveHub.slnx'
+      - '.dockerignore'
+      - '.github/workflows/api-image.yml'
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/gamesavehub-api
+  API_VERSION: 0.3.0
+  # Plancher de non-régression : le nombre de cas peut augmenter, jamais diminuer.
+  MINIMUM_TEST_CASES: 70
+
+concurrency:
+  group: api-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Compilation et tests
+    # Windows est nécessaire : Client.App, Client.Probe et Client.Service ciblent
+    # net10.0-windows (WPF). Compiler la solution entière ici garantit qu'une
+    # régression de l'IHM bloque la publication de l'image.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Garde-fous statiques
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $checks = @(
+            @{ Path = 'src/GameSaveHub.Server.Api/appsettings.json';   Pattern = '"AllowHostTransfer"\s*:\s*false';            Label = 'feature gate serveur (appsettings)' },
+            @{ Path = 'deploy/compose.portainer.yml';                  Pattern = 'FeatureGates__AllowHostTransfer:\s*"false"'; Label = 'feature gate serveur (Portainer)' },
+            @{ Path = 'deploy/compose.yml';                            Pattern = 'GSH_ALLOW_HOST_TRANSFER:-false';             Label = 'valeur par defaut du feature gate' },
+            @{ Path = 'src/GameSaveHub.Client.Service/appsettings.json'; Pattern = '"EnableWgsTransfer"\s*:\s*false';           Label = 'gate WGS local' }
+          )
+          foreach ($check in $checks) {
+            $content = Get-Content -LiteralPath $check.Path -Raw
+            if ($content -notmatch $check.Pattern) {
+              throw "Verrou ouvert par erreur : $($check.Label) dans $($check.Path)"
+            }
+          }
+          Write-Host 'Double verrou ferme : serveur=false et client WGS=false'
+
+      - name: Restauration
+        run: dotnet restore GameSaveHub.slnx
+
+      - name: Compilation complete
+        run: dotnet build GameSaveHub.slnx --configuration Release --no-restore
+
+      - name: Tests unitaires
+        run: >
+          dotnet test tests/Unit/GameSaveHub.UnitTests.csproj
+          --configuration Release --no-build
+          --logger "trx;LogFileName=results.trx"
+          --results-directory TestResults
+
+      - name: Controle du nombre de cas
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $trx = Get-ChildItem -Path TestResults -Filter *.trx -Recurse | Select-Object -First 1
+          if (-not $trx) { throw 'Aucun rapport de test produit.' }
+          [xml]$report = Get-Content -LiteralPath $trx.FullName
+          $counters = $report.TestRun.ResultSummary.Counters
+          $total    = [int]$counters.total
+          $passed   = [int]$counters.passed
+          $failed   = [int]$counters.failed
+          Write-Host "Total $total / reussis $passed / echecs $failed"
+          if ($failed -ne 0)  { throw "$failed test(s) en echec." }
+          if ($passed -ne $total) { throw "Des tests n'ont pas ete executes ($passed sur $total)." }
+          if ($total -lt [int]$env:MINIMUM_TEST_CASES) {
+            throw "Regression de couverture : $total cas pour un plancher de $env:MINIMUM_TEST_CASES."
+          }
+
+      - name: Rapport de test
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/**/*.trx
+          if-no-files-found: warn
+
+  image:
+    name: Image API vers GHCR
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Connexion a GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Construction et publication
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/GameSaveHub.Server.Api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ env.API_VERSION }}
+            ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+      - name: Recapitulatif
+        run: |
+          {
+            echo "### Image publiee"
+            echo ""
+            echo '```'
+            echo "${{ env.IMAGE_NAME }}:${{ env.API_VERSION }}"
+            echo "digest : ${{ steps.build.outputs.digest }}"
+            echo '```'
+            echo ""
+            echo "Sur le NAS :"
+            echo ""
+            echo '```'
+            echo "docker pull ${{ env.IMAGE_NAME }}:${{ env.API_VERSION }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
