@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -13,6 +15,8 @@ namespace GameSaveHub.Client.App;
 public partial class MainWindow : Window
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions ReportJsonOptions =
+        new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     private static readonly SolidColorBrush NeutralBrush = new((Color)ColorConverter.ConvertFromString("#AEB8C5"));
     private static readonly SolidColorBrush ProgressBrush = new((Color)ColorConverter.ConvertFromString("#7FB3D5"));
@@ -170,6 +174,57 @@ public partial class MainWindow : Window
 
         await SendSessionCommandAsync(TransferWizardPresenter.AbortCommand);
     });
+
+    private async void DiagnosticReport_Click(object sender, RoutedEventArgs e) => await GuardAsync(async () =>
+    {
+        var result = await _pipeClient.SendAsync(new PipeRequest("diagnostic-report"));
+        if (!result.Success)
+        {
+            FeedbackText.Text = "Rapport indisponible : " + result.Message;
+            return;
+        }
+
+        var folder = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var name = $"GameSaveHub-Rapport-{Environment.MachineName}-{DateTime.Now:yyyyMMdd-HHmmss}.zip";
+        var path = Path.Combine(folder, name);
+
+        using (var archive = ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+            var json = result.Data is JsonElement data
+                ? JsonSerializer.Serialize(data, ReportJsonOptions)
+                : "{}";
+            await WriteEntryAsync(archive, "rapport.json", json);
+
+            var appLog = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "GameSaveHub", "app.log");
+            if (File.Exists(appLog))
+            {
+                try
+                {
+                    await WriteEntryAsync(archive, "application.log", await File.ReadAllTextAsync(appLog));
+                }
+                catch (IOException exception)
+                {
+                    await WriteEntryAsync(archive, "application.log", "journal illisible : " + exception.Message);
+                }
+            }
+        }
+
+        // Ouvrir le dossier et présélectionner le fichier : le joueur distant ne doit pas
+        // avoir à chercher où il a été écrit.
+        Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+
+        FeedbackText.Text = $"Rapport créé sur le Bureau : {name} — envoyez ce fichier.";
+    });
+
+    private static async Task WriteEntryAsync(ZipArchive archive, string entryName, string content)
+    {
+        var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
+        await using var stream = entry.Open();
+        await using var writer = new StreamWriter(stream);
+        await writer.WriteAsync(content);
+    }
 
     private void CopyPlaceholder_Click(object sender, RoutedEventArgs e)
     {
@@ -334,8 +389,21 @@ public partial class MainWindow : Window
                 PrimaryAction = null,
                 ShowAbort = false,
                 IsWaitingOnService = false,
-                Tone = WizardTone.Danger
+                Tone = WizardTone.Danger,
+                StepNumber = 0
             };
+        }
+
+        // Savoir qu'il reste deux étapes plutôt qu'un nombre indéterminé change tout
+        // quand on suit une procédure seul, à distance.
+        if (_wizard.StepNumber > 0)
+        {
+            WizardStepText.Text = $"ÉTAPE {_wizard.StepNumber} SUR {_wizard.StepCount}";
+            WizardStepText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            WizardStepText.Visibility = Visibility.Collapsed;
         }
 
         WizardTitle.Text = _wizard.Title;
@@ -559,6 +627,7 @@ public partial class MainWindow : Window
         yield return WizardPrimaryButton;
         yield return WizardAbortButton;
         yield return CopyPlaceholderButton;
+        yield return DiagnosticReportButton;
         yield return WorldComboBox;
     }
 
@@ -570,6 +639,7 @@ public partial class MainWindow : Window
 
         RefreshButton.IsEnabled = true;
         CopyPlaceholderButton.IsEnabled = true;
+        DiagnosticReportButton.IsEnabled = true;
         WizardPrimaryButton.IsEnabled = true;
         WizardAbortButton.IsEnabled = true;
 

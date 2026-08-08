@@ -1,3 +1,11 @@
+param(
+    # Produit EN PLUS du package standard une variante PILOTE dont l installateur
+    # ouvre le verrou d ecriture WGS. Le package standard reste inchange et ferme.
+    # Ouvrir le verrou doit rester un acte volontaire : d ou un commutateur
+    # explicite, jamais une valeur par defaut.
+    [switch]$PilotTransfer
+)
+
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
@@ -269,6 +277,39 @@ $clientHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $clientZip).Hash.ToLo
 Set-Content -LiteralPath ($clientZip + '.sha256') -Encoding ASCII -Value "$clientHash *$(Split-Path -Leaf $clientZip)"
 Write-Host "Client ZIP : $clientZip"
 Write-Host "SHA-256    : $clientHash"
+
+if ($PilotTransfer) {
+    Write-Host "`n=== Variante PILOTE (verrou d ecriture ouvert) ===" -ForegroundColor Yellow
+
+    $pilotPackage = Join-Path $artifactRoot 'GameSaveHub-Client-Phase3-0.3.0-PILOTE'
+    if (Test-Path -LiteralPath $pilotPackage) { Remove-Item -LiteralPath $pilotPackage -Recurse -Force }
+    Copy-Item -LiteralPath $clientPackage -Destination $pilotPackage -Recurse -Force
+
+    # Le lanceur standard ne doit pas subsister dans la variante pilote : deux
+    # installateurs cote a cote inviteraient a se tromper de fichier.
+    Remove-Item -LiteralPath (Join-Path $pilotPackage 'INSTALLER-GAMESAVEHUB.cmd') -Force
+    Copy-Item -LiteralPath '.\tools\INSTALLER-GAMESAVEHUB-PILOTE.cmd' -Destination $pilotPackage -Force
+    Copy-Item -LiteralPath '.\tools\LISEZ-MOI-PILOTE.txt' -Destination (Join-Path $pilotPackage 'LISEZ-MOI-DABORD.txt') -Force
+
+    $pilotZip = Join-Path $artifactRoot 'GameSaveHub-Client-Phase3-0.3.0-PILOTE-win-x64.zip'
+    if (Test-Path -LiteralPath $pilotZip) { Remove-Item -LiteralPath $pilotZip -Force }
+    Compress-Archive -Path (Join-Path $pilotPackage '*') -DestinationPath $pilotZip -CompressionLevel Optimal
+    $pilotHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $pilotZip).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath ($pilotZip + '.sha256') -Encoding ASCII -Value "$pilotHash *$(Split-Path -Leaf $pilotZip)"
+
+    # Garde-fou croise : verifier que chaque package porte bien le verrou attendu.
+    $pilotCmd = Get-Content -LiteralPath (Join-Path $pilotPackage 'INSTALLER-GAMESAVEHUB-PILOTE.cmd') -Raw
+    if ($pilotCmd -notmatch '-EnableWgsTransfer \$true') {
+        throw 'La variante pilote n ouvre pas le verrou : elle serait identique au package standard.'
+    }
+    if (Test-Path -LiteralPath (Join-Path $clientPackage 'INSTALLER-GAMESAVEHUB-PILOTE.cmd')) {
+        throw 'Le package standard contient le lanceur pilote : le verrou pourrait etre ouvert par erreur.'
+    }
+
+    Write-Host "Package PILOTE : $pilotZip"
+    Write-Host "SHA-256        : $pilotHash"
+    Write-Host 'ATTENTION : ce package autorise l ecriture dans les sauvegardes du jeu.' -ForegroundColor Yellow
+}
 
 Write-Host "`n=== 6/6 Contexte Docker API 0.3.0 ===" -ForegroundColor Cyan
 $apiTar = Join-Path $artifactRoot 'GameSaveHub-API-0.3.0-Portainer-Build-Context.tar'

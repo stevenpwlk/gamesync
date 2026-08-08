@@ -138,6 +138,65 @@ public sealed class TransferWizardPresenterTests
         Assert.Contains(versionId.ToString(), view.Detail!, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(TransferStage.Acquiring, 1)]
+    [InlineData(TransferStage.AwaitingPlaceholder, 2)]
+    [InlineData(TransferStage.Importing, 3)]
+    [InlineData(TransferStage.ReadyToPlay, 4)]
+    [InlineData(TransferStage.InGame, 4)]
+    [InlineData(TransferStage.Uploading, 5)]
+    [InlineData(TransferStage.Completed, 6)]
+    public void NominalStagesAreNumberedForTheUser(TransferStage stage, int expected)
+    {
+        var view = TransferWizardPresenter.Describe(SessionAt(stage), true, true);
+
+        Assert.Equal(expected, view.StepNumber);
+        Assert.Equal(TransferWizardPresenter.NominalStepCount, view.StepCount);
+    }
+
+    [Theory]
+    [InlineData(TransferStage.Interrupted)]
+    [InlineData(TransferStage.ManualReview)]
+    [InlineData(TransferStage.Aborted)]
+    [InlineData(TransferStage.Failed)]
+    public void OffNominalStagesShowNoStepNumber(TransferStage stage)
+    {
+        var view = TransferWizardPresenter.Describe(SessionAt(stage), true, true);
+
+        Assert.Equal(0, view.StepNumber);
+    }
+
+    [Fact]
+    public void StepNumbersNeverGoBackwardsAlongTheNominalPath()
+    {
+        TransferStage[] path =
+        [
+            TransferStage.Initialized,
+            TransferStage.Acquiring,
+            TransferStage.DownloadingArtifact,
+            TransferStage.PreparingArtifact,
+            TransferStage.CreatingBaseline,
+            TransferStage.AwaitingPlaceholder,
+            TransferStage.Importing,
+            TransferStage.ReadyToPlay,
+            TransferStage.InGame,
+            TransferStage.CapturingResult,
+            TransferStage.UploadPending,
+            TransferStage.Uploading,
+            TransferStage.Publishing,
+            TransferStage.Completed
+        ];
+
+        var previous = 0;
+        foreach (var stage in path)
+        {
+            var step = TransferWizardPresenter.Describe(SessionAt(stage), true, true).StepNumber;
+            Assert.True(step >= previous, $"L'étape recule à {stage} : {step} après {previous}.");
+            Assert.InRange(step, 1, TransferWizardPresenter.NominalStepCount);
+            previous = step;
+        }
+    }
+
     [Fact]
     public void EveryStageProducesATitleAndAnInstruction()
     {

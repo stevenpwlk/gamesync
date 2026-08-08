@@ -1,5 +1,11 @@
 ﻿param(
-    [string]$ServerBaseUrl = "https://saves.stevenpwlk.fr:18443/"
+    [string]$ServerBaseUrl = "https://saves.stevenpwlk.fr:18443/",
+
+    # Autorise ce PC à écrire dans les sauvegardes du jeu.
+    # La valeur par défaut est et doit rester $false : ouvrir ce verrou est une
+    # décision explicite, prise campagne de test par campagne de test. Seul le
+    # package « PILOTE », produit délibérément par le build, passe ce commutateur.
+    [bool]$EnableWgsTransfer = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,7 +72,7 @@ $config = @{
         StatePath = "%ProgramData%\GameSaveHub\client-state.json"
         TransferRootPath = "%ProgramData%\GameSaveHub\transfers"
         CngKeyName = "GameSaveHub.DeviceIdentity"
-        EnableWgsTransfer = $false
+        EnableWgsTransfer = $EnableWgsTransfer
     }
 }
 $configPath = Join-Path $serviceRoot "appsettings.local.json"

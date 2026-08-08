@@ -78,7 +78,7 @@
         </StackPanel>
         <Rectangle Grid.Column="5" Width="1" Fill="{StaticResource Border}" Margin="20,2" />
         <StackPanel Grid.Column="6">
-          <TextBlock Text="ÉCRITURE WGS" Style="{StaticResource Caption}" />
+          <TextBlock Text="MODIFICATION DES SAUVEGARDES" Style="{StaticResource Caption}" />
           <TextBlock x:Name="LocalGateText" Text="Désactivée" FontSize="14"
                      Foreground="{StaticResource Success}" FontWeight="SemiBold" Margin="0,5,0,0" />
         </StackPanel>
@@ -142,6 +142,8 @@
             <Border Background="{StaticResource SurfaceRaised}" BorderBrush="{StaticResource BorderStrong}"
                     BorderThickness="1" CornerRadius="8" Padding="22">
               <StackPanel>
+                <TextBlock x:Name="WizardStepText" Style="{StaticResource Caption}"
+                           Foreground="#4B9FE1" Visibility="Collapsed" Margin="0,0,0,7" />
                 <TextBlock x:Name="WizardTitle" Text="Aucun transfert en cours"
                            FontSize="20" FontWeight="SemiBold" />
                 <TextBlock x:Name="WizardInstruction"
@@ -198,7 +200,10 @@
                           Click="WizardPrimary_Click" Style="{StaticResource PrimaryButton}"
                           Margin="0,0,10,0" Visibility="Collapsed" />
                   <Button x:Name="WizardAbortButton" Content="Abandonner"
-                          Click="WizardAbort_Click" Visibility="Collapsed" />
+                          Click="WizardAbort_Click" Margin="0,0,10,0" Visibility="Collapsed" />
+                  <Button x:Name="DiagnosticReportButton" Content="Générer un rapport"
+                          Click="DiagnosticReport_Click"
+                          ToolTip="Crée sur le Bureau un fichier à envoyer en cas de problème. Ne contient aucune donnée de vos sauvegardes." />
                 </WrapPanel>
               </StackPanel>
             </Border>
@@ -238,7 +243,7 @@
               <Border Background="{StaticResource SurfaceInput}" BorderBrush="{StaticResource Border}"
                       BorderThickness="1" CornerRadius="6" Padding="15" Margin="0,16,0,0">
                 <StackPanel>
-                  <TextBlock Text="PRÉFLIGHT" Style="{StaticResource Caption}" />
+                  <TextBlock Text="VÉRIFICATION DE COMPATIBILITÉ" Style="{StaticResource Caption}" />
                   <TextBlock x:Name="CompatibilityText"
                              Text="Sélectionnez un monde puis lancez la vérification."
                              Margin="0,7,0,0" />

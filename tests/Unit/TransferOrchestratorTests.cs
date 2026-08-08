@@ -251,6 +251,11 @@ public sealed class TransferOrchestratorTests : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult<IReadOnlyList<TransferSession>>(_sessions.Values.Where(session => TransferStageRules.HoldsLocalLock(session.Stage)).ToArray());
         }
+        public Task<IReadOnlyList<TransferSession>> ReadAllAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<IReadOnlyList<TransferSession>>(_sessions.Values.ToArray());
+        }
         public Task WriteAsync(TransferSession session, string eventName, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();

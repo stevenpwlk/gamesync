@@ -31,7 +31,9 @@ public sealed record WizardView(
     WizardAction? PrimaryAction,
     bool ShowAbort,
     bool IsWaitingOnService,
-    WizardTone Tone);
+    WizardTone Tone,
+    int StepNumber = 0,
+    int StepCount = TransferWizardPresenter.NominalStepCount);
 
 /// <summary>
 /// Traduit l'état d'une session de transfert en instructions pour un joueur.
@@ -47,6 +49,12 @@ public sealed record WizardView(
 /// </remarks>
 public static class TransferWizardPresenter
 {
+    /// <summary>
+    /// Nombre d'étapes visibles par le joueur. Savoir qu'il en reste deux plutôt
+    /// qu'un nombre indéterminé change tout quand on suit une procédure à distance.
+    /// </summary>
+    public const int NominalStepCount = 6;
+
     public const string StartCommand = "transfer-start";
     public const string PlaceholderReadyCommand = "transfer-placeholder-ready";
     public const string PlayStartedCommand = "transfer-play-started";
@@ -84,7 +92,8 @@ public static class TransferWizardPresenter
                 null,
                 canAbort,
                 true,
-                WizardTone.Progress),
+                WizardTone.Progress,
+                StepNumber: 1),
 
             TransferStage.AwaitingPlaceholder => new WizardView(
                 "Créez le monde d'accueil dans Planet Crafter",
@@ -100,7 +109,8 @@ public static class TransferWizardPresenter
                 new WizardAction("J'ai créé le monde", PlaceholderReadyCommand),
                 canAbort,
                 false,
-                WizardTone.Action),
+                WizardTone.Action,
+                StepNumber: 2),
 
             TransferStage.Importing => new WizardView(
                 "Import en cours",
@@ -111,7 +121,8 @@ public static class TransferWizardPresenter
                 null,
                 false,
                 true,
-                WizardTone.Progress),
+                WizardTone.Progress,
+                StepNumber: 3),
 
             TransferStage.ReadyToPlay => new WizardView(
                 "La sauvegarde est prête",
@@ -128,7 +139,8 @@ public static class TransferWizardPresenter
                 new WizardAction("J'ai lancé le jeu", PlayStartedCommand),
                 false,
                 false,
-                WizardTone.Action),
+                WizardTone.Action,
+                StepNumber: 4),
 
             TransferStage.InGame => new WizardView(
                 "Partie en cours",
@@ -143,7 +155,8 @@ public static class TransferWizardPresenter
                 new WizardAction("J'ai sauvegardé et fermé le jeu", PlayCompleteCommand),
                 false,
                 false,
-                WizardTone.Action),
+                WizardTone.Action,
+                StepNumber: 4),
 
             TransferStage.CapturingResult or
             TransferStage.UploadPending or
@@ -157,7 +170,8 @@ public static class TransferWizardPresenter
                 null,
                 false,
                 true,
-                WizardTone.Progress),
+                WizardTone.Progress,
+                StepNumber: 5),
 
             TransferStage.Completed => new WizardView(
                 "Transfert terminé",
@@ -168,7 +182,8 @@ public static class TransferWizardPresenter
                 new WizardAction("Fermer", null),
                 false,
                 false,
-                WizardTone.Success),
+                WizardTone.Success,
+                StepNumber: 6),
 
             TransferStage.Interrupted => new WizardView(
                 "Session interrompue",

@@ -2,6 +2,7 @@ using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
+using GameSaveHub.Adapters.Abstractions;
 using GameSaveHub.Client.Orchestration;
 using GameSaveHub.Contracts;
 using Microsoft.Extensions.Options;
@@ -15,6 +16,8 @@ public sealed partial class PipeServerWorker(
     ServerEnrollmentClient enrollmentClient,
     ITransferServerClient serverClient,
     TransferOrchestrator orchestrator,
+    ITransferSessionStore sessionStore,
+    IGameSaveAdapter adapter,
     ILogger<PipeServerWorker> logger) : BackgroundService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -121,6 +124,7 @@ public sealed partial class PipeServerWorker(
                 "preflight" when request.WorldId is Guid preflightWorldId =>
                     await RunPreflightAsync(preflightWorldId, cancellationToken),
                 "transfer-active" => ToPipe(await GetActiveTransferStatusAsync(cancellationToken)),
+                "diagnostic-report" => await BuildDiagnosticReportAsync(cancellationToken),
                 "transfer-start" when request.WorldId is Guid worldId =>
                     await StartTransferAsync(worldId, request.PlayerName, cancellationToken),
                 "transfer-placeholder-ready" when request.TransferSessionId is Guid placeholderSessionId =>
@@ -232,6 +236,114 @@ public sealed partial class PipeServerWorker(
         }
 
         return ToPipe(await orchestrator.StartAsync(worldId, state.RegisteredPlayerName, cancellationToken));
+    }
+
+    /// <summary>
+    /// Rapport technique destiné à être renvoyé après une session, réussie ou non.
+    /// </summary>
+    /// <remarks>
+    /// Le PC distant ne peut être sollicité qu'une fois : ce rapport doit donc contenir
+    /// tout ce qui permettrait de diagnostiquer un échec sans rappeler le joueur.
+    /// Il ne contient en revanche <b>aucune donnée de sauvegarde</b> : les répertoires
+    /// <c>inbound</c>, <c>prepared</c>, <c>outbound</c> et <c>safety</c> ne sont jamais
+    /// lus, seuls leurs chemins et empreintes déjà présents dans le checkpoint le sont.
+    /// </remarks>
+    private async Task<PipeResponse> BuildDiagnosticReportAsync(CancellationToken cancellationToken)
+    {
+        var state = await stateStore.ReadAsync(cancellationToken);
+        var sessions = await orchestrator.GetAllSessionsAsync(cancellationToken);
+
+        var journals = new List<object>();
+        foreach (var session in sessions)
+        {
+            var journalPath = Path.Combine(sessionStore.GetSessionDirectory(session.LocalSessionId), "events.ndjson");
+            string[] entries;
+            try
+            {
+                entries = File.Exists(journalPath)
+                    ? await File.ReadAllLinesAsync(journalPath, cancellationToken)
+                    : [];
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                entries = [$"journal illisible : {exception.Message}"];
+            }
+
+            journals.Add(new
+            {
+                session.LocalSessionId,
+                Stage = session.Stage.ToString(),
+                Events = entries.TakeLast(200).ToArray()
+            });
+        }
+
+        InstallationDetection? detection = null;
+        string? detectionError = null;
+        try
+        {
+            detection = await adapter.DetectInstallationAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            detectionError = exception.Message;
+        }
+
+        return new PipeResponse(true, "ok", "Rapport de diagnostic généré.", new
+        {
+            GeneratedAtUtc = DateTimeOffset.UtcNow,
+            Machine = Environment.MachineName,
+            OperatingSystem = Environment.OSVersion.VersionString,
+            Runtime = Environment.Version.ToString(),
+            Client = new
+            {
+                state.DeviceId,
+                state.RegisteredPlayerName,
+                IdentityKeyExists = identity.Exists
+            },
+            Configuration = new
+            {
+                _options.PipeName,
+                _options.ServerBaseUrl,
+                _options.RegisteredUserSid,
+                _options.RegisteredUserLocalAppData,
+                _options.TransferRootPath,
+                _options.EnableWgsTransfer
+            },
+            Adapter = new
+            {
+                adapter.Capabilities,
+                Detection = detection,
+                DetectionError = detectionError
+            },
+            Sessions = sessions,
+            Journals = journals,
+            WindowsEventLog = ReadOwnEventLog()
+        });
+    }
+
+    /// <summary>
+    /// Dernières entrées que ce service a écrites dans le journal Windows.
+    /// C'est là que remontent les échecs du canal nommé, invisibles ailleurs.
+    /// </summary>
+    private static string[] ReadOwnEventLog()
+    {
+        if (!OperatingSystem.IsWindows()) return [];
+        try
+        {
+            using var log = new System.Diagnostics.EventLog("Application");
+            var since = DateTime.Now.AddDays(-7);
+            return log.Entries
+                .Cast<System.Diagnostics.EventLogEntry>()
+                .Where(entry => entry.TimeGenerated >= since &&
+                                entry.Source.StartsWith("GameSaveHub", StringComparison.OrdinalIgnoreCase))
+                .TakeLast(60)
+                .Select(entry => $"{entry.TimeGenerated:O} [{entry.EntryType}] {entry.Message}")
+                .ToArray();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.Security.SecurityException or ArgumentException)
+        {
+            return [$"journal Windows illisible : {exception.Message}"];
+        }
     }
 
     private async Task<TransferOperationResult> GetActiveTransferStatusAsync(CancellationToken cancellationToken)

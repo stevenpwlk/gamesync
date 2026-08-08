@@ -24,6 +24,28 @@ public sealed class FileTransferSessionStore(string rootPath) : ITransferSession
         }
     }
 
+    public async Task<IReadOnlyList<TransferSession>> ReadAllAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!Directory.Exists(RootPath)) return [];
+            var sessions = new List<TransferSession>();
+            foreach (var directory in Directory.EnumerateDirectories(RootPath).Order(StringComparer.OrdinalIgnoreCase))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!Guid.TryParse(Path.GetFileName(directory), out var id)) continue;
+                var session = await ReadCoreAsync(id, cancellationToken);
+                if (session is not null) sessions.Add(session);
+            }
+            return sessions.OrderByDescending(session => session.UpdatedAtUtc).ToArray();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task<IReadOnlyList<TransferSession>> ReadActiveAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken);

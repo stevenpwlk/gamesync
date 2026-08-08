@@ -1,0 +1,119 @@
+GameSave Hub - test de partage de sauvegarde
+============================================
+
+Ce programme permet de reprendre la partie The Planet Crafter
+que Steven a deposee sur son serveur, de jouer dessus, puis de
+la lui renvoyer automatiquement.
+
+Prevoir environ une heure, en une seule fois.
+L operation demande de lancer le jeu deux fois.
+
+
+AVANT DE COMMENCER
+------------------
+
+- Fermer completement The Planet Crafter.
+- Verifier dans l application Xbox qu aucune synchronisation
+  n est en cours.
+- Avoir le code d invitation envoye par Steven.
+
+
+ETAPE 1 - INSTALLER
+-------------------
+
+1. Extraire ce dossier quelque part (Bureau, Telechargements).
+   Extraire d abord : ne pas lancer depuis l interieur du ZIP.
+
+2. Double-cliquer sur :
+
+      INSTALLER-GAMESAVEHUB-PILOTE.cmd
+
+3. Windows demande une autorisation dans une fenetre bleue.
+   Repondre Oui.
+
+   Si Windows affiche "Windows a protege votre ordinateur" :
+   cliquer sur "Informations complementaires", puis
+   "Executer quand meme". C est normal, le programme n est
+   pas signe par un editeur commercial.
+
+4. Attendre INSTALLATION TERMINEE. L application s ouvre seule.
+
+
+ETAPE 2 - ASSOCIER VOTRE PC
+---------------------------
+
+Dans la colonne de gauche, remplir :
+
+   Pseudo Planet Crafter : votre pseudo EXACT dans le jeu
+   Code d invitation     : celui envoye par Steven
+
+Puis cliquer sur "Associer ce PC".
+
+Le pseudo doit correspondre exactement a votre personnage dans
+la partie partagee. S il ne correspond pas, le programme
+refusera le transfert : c est voulu, cela evite de vous faire
+jouer le personnage de quelqu un d autre.
+
+
+ETAPE 3 - SUIVRE L ASSISTANT
+----------------------------
+
+Cliquer sur "Charger la liste", choisir la partie proposee,
+puis "Verifier la compatibilite".
+
+A partir de la, le grand cadre en haut a droite vous guide.
+Il n affiche qu une seule action a la fois. Faire exactement
+ce qu il demande, dans l ordre, sans anticiper.
+
+Deux moments demandent de lancer le jeu :
+
+   - Il vous demandera de CREER une nouvelle partie portant
+     un nom precis, affiche en gros a l ecran. Recopier ce nom
+     exactement, sans espace avant ni apres. Sauvegarder,
+     puis quitter completement le jeu.
+
+   - Plus tard, il vous demandera de LANCER le jeu et de
+     charger la partie preparee. Jouer quelques minutes,
+     sauvegarder, puis quitter completement le jeu.
+
+Entre les deux, laisser le programme travailler sans toucher
+au jeu.
+
+
+ETAPE 4 - ENVOYER LE RAPPORT
+----------------------------
+
+A la fin, que tout se soit bien passe ou non, cliquer sur :
+
+      Generer un rapport
+
+Un fichier est cree et son dossier s ouvre. L envoyer a Steven.
+
+Ce rapport contient uniquement des informations techniques :
+etapes parcourues, erreurs eventuelles, horodatages. Il ne
+contient aucune donnee de vos sauvegardes personnelles.
+
+
+CE QUE LE PROGRAMME NE FAIT JAMAIS
+----------------------------------
+
+- Il ne modifie aucune de vos parties existantes.
+  Il ecrit uniquement dans la nouvelle partie que vous
+  aurez creee vous-meme a l etape 3.
+
+- Il ne supprime rien.
+
+- Avant d ecrire quoi que ce soit, il photographie l etat de
+  toutes vos sauvegardes et refuse de continuer si la moindre
+  chose a change entre-temps.
+
+
+EN CAS DE PROBLEME
+------------------
+
+Ne rien tenter de reparer. Cliquer sur "Generer un rapport"
+et l envoyer a Steven avec une capture d ecran.
+
+Si le programme affiche "Verification manuelle necessaire",
+c est qu il a detecte une situation qu il refuse de traiter
+tout seul. Il n ecrira rien de plus. Envoyer le rapport.

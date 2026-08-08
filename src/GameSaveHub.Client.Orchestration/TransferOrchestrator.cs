@@ -44,6 +44,12 @@ public sealed class TransferOrchestrator(
             : Success("status", "État de la session locale.", session);
     }
 
+    /// <summary>
+    /// Toutes les sessions locales, terminées comprises, pour le rapport de diagnostic.
+    /// </summary>
+    public async Task<IReadOnlyList<TransferSession>> GetAllSessionsAsync(CancellationToken cancellationToken = default) =>
+        await store.ReadAllAsync(cancellationToken);
+
     public async Task<IReadOnlyList<TransferSession>> GetActiveSessionsAsync(CancellationToken cancellationToken = default) =>
         await store.ReadActiveAsync(cancellationToken);
 
