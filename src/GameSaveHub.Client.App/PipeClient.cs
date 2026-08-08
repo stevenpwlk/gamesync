@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using System.IO;
+using System.Security.Principal;
 using System.Text.Json;
 
 namespace GameSaveHub.Client.App;
@@ -19,7 +20,15 @@ public sealed class PipeClient(string pipeName = "GameSaveHub.Client")
 
     public async Task<PipeResponse> SendAsync(PipeRequest request, CancellationToken cancellationToken = default)
     {
-        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        // Identification, et pas Impersonation : le service doit pouvoir vérifier QUI
+        // se connecte, sans jamais pouvoir agir sous cette identité. C'est le niveau
+        // minimal permettant le contrôle du SID côté serveur.
+        await using var pipe = new NamedPipeClientStream(
+            ".",
+            pipeName,
+            PipeDirection.InOut,
+            PipeOptions.Asynchronous,
+            TokenImpersonationLevel.Identification);
         await pipe.ConnectAsync(3000, cancellationToken);
         using var reader = new StreamReader(pipe, leaveOpen: true);
         await using var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };

@@ -260,7 +260,7 @@ public partial class MainWindow : Window
                 : $"Associé — {_registeredPlayerName}"
             : "PC non associé";
 
-        LocalGateText.Text = _wgsTransferEnabled ? "Écriture WGS : ACTIVÉE" : "Écriture WGS : désactivée";
+        LocalGateText.Text = _wgsTransferEnabled ? "ACTIVÉE" : "Désactivée";
         LocalGateText.Foreground = _wgsTransferEnabled ? WarningBrush : ActionBrush;
         LocalGateHelpText.Text = _wgsTransferEnabled
             ? "Ce PC peut écrire dans vos sauvegardes Planet Crafter. Suivez l’assistant sans sauter d’étape."

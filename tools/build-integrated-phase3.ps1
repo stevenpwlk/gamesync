@@ -102,6 +102,21 @@ function Test-Phase3Guards {
     if ($pipe -notmatch 'PlayerCompatibilityRules\.Evaluate') {
         throw 'Validation du pseudo serveur absente.'
     }
+    # Windows refuse ImpersonateNamedPipeClient tant qu aucune donnee n a ete lue sur le
+    # canal. Verifier le SID avant la lecture faisait echouer toutes les connexions.
+    # L ordre lecture -> controle du SID -> execution doit donc etre preserve.
+    $readIndex = $pipe.IndexOf('ReadLineAsync')
+    $sidIndex = $pipe.IndexOf('GetConnectedSid(pipe)')
+    $dispatchIndex = $pipe.IndexOf('DispatchAsync(request')
+    if ($readIndex -lt 0 -or $sidIndex -lt 0 -or $dispatchIndex -lt 0) {
+        throw 'Sequence de traitement du named pipe introuvable.'
+    }
+    if ($sidIndex -lt $readIndex) {
+        throw 'Le controle du SID precede la lecture du canal : toutes les connexions echoueront.'
+    }
+    if ($dispatchIndex -lt $sidIndex) {
+        throw 'Une commande serait executee avant le controle du SID appelant.'
+    }
     if ($serviceProgram -notmatch 'appsettings\.local\.json') {
         throw 'Chargement de la configuration locale installateur absent.'
     }

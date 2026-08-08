@@ -30,14 +30,7 @@ public sealed partial class PipeServerWorker(
             await pipe.WaitForConnectionAsync(stoppingToken);
             try
             {
-                var connectedSid = GetConnectedSid(pipe);
-                if (!expectedSid.Equals(connectedSid))
-                {
-                    LogRejectedClient(logger, connectedSid.Value);
-                    pipe.Disconnect();
-                    continue;
-                }
-                await HandleClientAsync(pipe, stoppingToken);
+                await HandleClientAsync(pipe, expectedSid, stoppingToken);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -46,12 +39,36 @@ public sealed partial class PipeServerWorker(
         }
     }
 
-    private async Task HandleClientAsync(NamedPipeServerStream pipe, CancellationToken cancellationToken)
+    private async Task HandleClientAsync(
+        NamedPipeServerStream pipe,
+        SecurityIdentifier expectedSid,
+        CancellationToken cancellationToken)
     {
         using var reader = new StreamReader(pipe, leaveOpen: true);
         await using var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
+
+        // La lecture doit précéder le contrôle d'identité : Windows refuse
+        // ImpersonateNamedPipeClient tant qu'aucune donnée n'a été lue sur le canal.
+        // Vérifier le SID avant de lire faisait échouer *toutes* les connexions avec
+        // « Impossible d'emprunter une identité [...] tant qu'aucune donnée n'a été lue ».
         var line = await reader.ReadLineAsync(cancellationToken);
-        var request = line is null ? null : JsonSerializer.Deserialize<PipeRequest>(line, JsonOptions);
+        if (line is null) return;
+
+        // Rien n'a encore été exécuté à ce stade : la requête n'est même pas désérialisée.
+        // Le contrôle du SID reste donc bien antérieur à toute action.
+        var connectedSid = GetConnectedSid(pipe);
+        if (!expectedSid.Equals(connectedSid))
+        {
+            LogRejectedClient(logger, connectedSid.Value);
+            var refusal = new PipeResponse(
+                false,
+                "client_not_authorized",
+                "Ce compte Windows n'est pas celui enregistré pour GameSave Hub sur ce PC.");
+            await writer.WriteLineAsync(JsonSerializer.Serialize(refusal, JsonOptions).AsMemory(), cancellationToken);
+            return;
+        }
+
+        var request = JsonSerializer.Deserialize<PipeRequest>(line, JsonOptions);
         var response = request is null
             ? new PipeResponse(false, "invalid_request", "Requête locale invalide.")
             : await DispatchAsync(request, cancellationToken);
