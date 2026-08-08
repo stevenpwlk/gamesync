@@ -1,12 +1,11 @@
-* text=auto
-
-*.ps1 text eol=crlf
-*.cmd text eol=crlf
-*.bat text eol=crlf
-
-*.sh text eol=lf
-Dockerfile text eol=lf
-*.yml text eol=lf
+# Aucune conversion de fins de ligne.
+#
+# Ce dépôt embarque SOURCE-SHA256SUMS.txt, un manifeste SHA-256 vérifié par
+# tools/build-integrated-phase3.ps1 avant toute compilation. Normaliser les
+# fins de ligne ferait diverger les octets d'un clone de ceux qui ont servi
+# à calculer les empreintes, et le manifeste échouerait sur toute machine
+# fraîchement clonée. L'intégrité byte-à-byte prime ici sur le confort.
+* -text
 
 *.gshsave binary
 *.gshhostdiag binary
@@ -14,3 +13,5 @@ Dockerfile text eol=lf
 *.gshbobdiag binary
 *.gshroundtripdiag binary
 *.gshnetdiag binary
+*.tar binary
+*.zip binary
