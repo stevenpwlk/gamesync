@@ -115,6 +115,39 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
     }
 
     [Fact]
+    public async Task ExportByDisplayNameRefusesTwoHomonymousWorlds()
+    {
+        // Situation normale dès qu'une même sauvegarde a été importée deux fois sur
+        // le même PC : deux mondes distincts portent le même nom affiché.
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-3.json", "GSH-SHLAGS-RETURN");
+        CreateWorldFixture(wgs, "Standard-4.json", "GSH-SHLAGS-RETURN");
+        var adapter = CreateAdapter();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => adapter.ExportPortableArtifactAsync("GSH-SHLAGS-RETURN", Path.Combine(_root, "artifacts")));
+
+        Assert.Contains("Standard-3.json", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Standard-4.json", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExportByLogicalNameDiscriminatesHomonymousWorlds()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-3.json", "GSH-SHLAGS-RETURN");
+        CreateWorldFixture(wgs, "Standard-4.json", "GSH-SHLAGS-RETURN");
+        var adapter = CreateAdapter();
+
+        var artifact = await adapter.ExportPortableArtifactByLogicalNameAsync(
+            "Standard-4.json", Path.Combine(_root, "artifacts"));
+
+        Assert.NotNull(artifact.Manifest);
+        Assert.Equal("Standard-4.json", artifact.Manifest.LogicalName);
+        Assert.True((await adapter.ValidateArtifactAsync(artifact)).IsValid);
+    }
+
+    [Fact]
     public async Task PortableExportContainsOnlyManifestAndWorldPayload()
     {
         var wgs = CreateWgs();

@@ -361,12 +361,20 @@ public sealed class TransferOrchestratorTests : IDisposable
             return Task.FromResult(new LocalStorageInspection(1, Id, "pkg", DateTimeOffset.UtcNow, false, true, [], [], [world], []));
         }
         public Task<SnapshotResult> CreateSafetySnapshotAsync(string outputRoot, string? acknowledgedTestWorldName, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public string? ExportedByLogicalName { get; private set; }
+
         public async Task<PortableSaveArtifact> ExportPortableArtifactAsync(string worldName, string outputRoot, CancellationToken cancellationToken = default)
         {
             Directory.CreateDirectory(outputRoot);
             var path = Path.Combine(outputRoot, "outbound.gshsave");
             await File.WriteAllBytesAsync(path, [1, 2, 3, 4, 5], cancellationToken);
             return new PortableSaveArtifact(path, "outbound-sha", 5, null);
+        }
+
+        public async Task<PortableSaveArtifact> ExportPortableArtifactByLogicalNameAsync(string logicalName, string outputRoot, CancellationToken cancellationToken = default)
+        {
+            ExportedByLogicalName = logicalName;
+            return await ExportPortableArtifactAsync(logicalName, outputRoot, cancellationToken);
         }
         public Task<ArtifactValidation> ValidateArtifactAsync(PortableSaveArtifact artifact, CancellationToken cancellationToken = default) => Task.FromResult(new ArtifactValidation(true, []));
         public async Task<HostPreparation> PrepareForHostAsync(PortableSaveArtifact artifact, string playerName, string outputRoot, CancellationToken cancellationToken = default)

@@ -504,7 +504,10 @@ public sealed class TransferOrchestrator(
             }
 
             var outboundRoot = Path.Combine(store.GetSessionDirectory(session.LocalSessionId), "outbound");
-            var artifact = await adapter.ExportPortableArtifactAsync(target.DisplayName, outboundRoot, cancellationToken);
+            // Par nom logique, jamais par nom affiche : apres un second import de la
+            // meme sauvegarde, deux mondes portent le meme nom affiche et la capture
+            // echouait sur « Sequence contains more than one matching element ».
+            var artifact = await adapter.ExportPortableArtifactByLogicalNameAsync(target.LogicalName, outboundRoot, cancellationToken);
             session = await PersistAsync(session with
             {
                 TargetDisplayName = target.DisplayName,

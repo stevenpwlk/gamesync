@@ -11,6 +11,13 @@ public interface IGameSaveAdapter
     Task<LocalStorageInspection> InspectLocalStorageAsync(CancellationToken cancellationToken = default);
     Task<SnapshotResult> CreateSafetySnapshotAsync(string outputRoot, string? acknowledgedTestWorldName, CancellationToken cancellationToken = default);
     Task<PortableSaveArtifact> ExportPortableArtifactAsync(string worldName, string outputRoot, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Exporte en désignant le monde par son nom logique, seul identifiant unique.
+    /// Le nom affiché ne l'est pas : deux imports de la même sauvegarde produisent
+    /// deux mondes homonymes.
+    /// </summary>
+    Task<PortableSaveArtifact> ExportPortableArtifactByLogicalNameAsync(string logicalName, string outputRoot, CancellationToken cancellationToken = default);
     Task<ArtifactValidation> ValidateArtifactAsync(PortableSaveArtifact artifact, CancellationToken cancellationToken = default);
     Task<HostPreparation> PrepareForHostAsync(PortableSaveArtifact artifact, string playerName, string outputRoot, CancellationToken cancellationToken = default);
     Task<ImportBaselineResult> CreateImportBaselineAsync(string outputRoot, CancellationToken cancellationToken = default);

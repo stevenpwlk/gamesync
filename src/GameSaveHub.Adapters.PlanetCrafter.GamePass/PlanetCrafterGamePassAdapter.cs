@@ -334,7 +334,29 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
     public async Task<PortableSaveArtifact> ExportPortableArtifactAsync(
         string worldName,
         string outputRoot,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await ExportAsync(worldName, byLogicalName: false, outputRoot, cancellationToken);
+
+    /// <summary>
+    /// Exporte en désignant le monde par son nom logique.
+    /// </summary>
+    /// <remarks>
+    /// Le nom affiché n'est pas unique : deux imports successifs de la même
+    /// sauvegarde produisent deux mondes homonymes. Toute résolution par nom affiché
+    /// devient alors ambiguë, alors que le nom logique reste discriminant.
+    /// C'est la voie que doit emprunter l'orchestrateur, qui connaît sa cible exacte.
+    /// </remarks>
+    public async Task<PortableSaveArtifact> ExportPortableArtifactByLogicalNameAsync(
+        string logicalName,
+        string outputRoot,
+        CancellationToken cancellationToken = default) =>
+        await ExportAsync(logicalName, byLogicalName: true, outputRoot, cancellationToken);
+
+    private async Task<PortableSaveArtifact> ExportAsync(
+        string name,
+        bool byLogicalName,
+        string outputRoot,
+        CancellationToken cancellationToken)
     {
         if (ProbeProcesses().Count > 0) throw new InvalidOperationException("Fermez complètement The Planet Crafter avant l'export.");
         var detection = await DetectInstallationAsync(cancellationToken);
@@ -347,8 +369,19 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
 
         var before = await InspectLocalStorageAsync(cancellationToken);
         if (!before.Stable) throw new InvalidOperationException("Le stockage WGS n'est pas stable.");
-        var world = before.Worlds.SingleOrDefault(item => item.DisplayName.Equals(worldName, StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidOperationException($"Monde introuvable : {worldName}.");
+        var matches = byLogicalName
+            ? before.Worlds.Where(item => item.LogicalName.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray()
+            : before.Worlds.Where(item => item.DisplayName.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (matches.Length == 0) throw new InvalidOperationException($"Monde introuvable : {name}.");
+        if (matches.Length > 1)
+        {
+            // Diagnostic explicite plutot qu'une exception LINQ illisible : c'est la
+            // situation normale des que la meme sauvegarde a ete importee deux fois.
+            var logicalNames = string.Join(", ", matches.Select(item => item.LogicalName));
+            throw new InvalidOperationException(
+                $"Plusieurs mondes portent le nom « {name} » ({logicalNames}). Désignez-le par son nom logique.");
+        }
+        var world = matches[0];
         var source = ResolveContainedPath(detection.WgsRoot, world.BlobRelativePath);
         var payloadHash = await FileSafety.ComputeSha256Async(source, cancellationToken);
         var payloadLength = new FileInfo(source).Length;
@@ -394,7 +427,10 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
 
             if (ProbeProcesses().Count > 0) throw new IOException("Le jeu a été lancé pendant l'export.");
             var after = await InspectLocalStorageAsync(cancellationToken);
-            var afterWorld = after.Worlds.Single(item => item.DisplayName.Equals(worldName, StringComparison.OrdinalIgnoreCase));
+            // Relecture par nom logique : le nom affiche peut avoir change avec le
+            // contenu, et il ne designe de toute facon pas un monde de maniere unique.
+            var afterWorld = after.Worlds.SingleOrDefault(item => item.LogicalName.Equals(world.LogicalName, StringComparison.OrdinalIgnoreCase))
+                ?? throw new IOException("Le monde exporté a disparu pendant l'export.");
             var afterSource = ResolveContainedPath(detection.WgsRoot, afterWorld.BlobRelativePath);
             if (!payloadHash.Equals(await FileSafety.ComputeSha256Async(afterSource, cancellationToken), StringComparison.OrdinalIgnoreCase))
             {
