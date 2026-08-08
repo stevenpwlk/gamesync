@@ -2,10 +2,12 @@
     [string]$ServerBaseUrl = "https://saves.stevenpwlk.fr:18443/",
 
     # Autorise ce PC à écrire dans les sauvegardes du jeu.
-    # La valeur par défaut est et doit rester $false : ouvrir ce verrou est une
-    # décision explicite, prise campagne de test par campagne de test. Seul le
-    # package « PILOTE », produit délibérément par le build, passe ce commutateur.
-    [bool]$EnableWgsTransfer = $false
+    # Commutateur, donc absent par défaut : ouvrir ce verrou est une décision
+    # explicite, prise campagne de test par campagne de test. Seul le package
+    # « PILOTE », produit délibérément par le build, le passe.
+    # Un [bool] serait ici un piège : appelé depuis un .cmd, « -EnableWgsTransfer $true »
+    # transmet la chaîne littérale « $true », que PowerShell refuse de convertir.
+    [switch]$EnableWgsTransfer
 )
 
 $ErrorActionPreference = "Stop"
@@ -72,7 +74,7 @@ $config = @{
         StatePath = "%ProgramData%\GameSaveHub\client-state.json"
         TransferRootPath = "%ProgramData%\GameSaveHub\transfers"
         CngKeyName = "GameSaveHub.DeviceIdentity"
-        EnableWgsTransfer = $EnableWgsTransfer
+        EnableWgsTransfer = [bool]$EnableWgsTransfer
     }
 }
 $configPath = Join-Path $serviceRoot "appsettings.local.json"
@@ -110,5 +112,11 @@ Write-Host "INSTALLATION RÉUSSIE" -ForegroundColor Green
 Write-Host "Service : $serviceName / Running"
 Write-Host "Application : $appExe"
 Write-Host "Raccourci : $shortcutPath"
-Write-Host "Écriture WGS locale : DÉSACTIVÉE (EnableWgsTransfer=false)" -ForegroundColor Green
-Write-Host "Le prochain test peut enrôler le PC et lire le catalogue NAS sans importer de sauvegarde."
+if ($EnableWgsTransfer) {
+    Write-Host "Écriture des sauvegardes : ACTIVÉE sur ce PC (EnableWgsTransfer=true)" -ForegroundColor Yellow
+    Write-Host "Ce PC pourra écrire dans un monde neuf que vous créerez vous-même. Suivez l'assistant sans sauter d'étape."
+}
+else {
+    Write-Host "Écriture des sauvegardes : DÉSACTIVÉE (EnableWgsTransfer=false)" -ForegroundColor Green
+    Write-Host "Ce PC peut enrôler, lire le catalogue et vérifier la compatibilité, sans rien écrire."
+}

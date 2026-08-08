@@ -47,7 +47,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 
 echo   Installation en cours, merci de patienter...
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0INSTALL-GAMESAVEHUB-CLIENT.ps1" -EnableWgsTransfer $true
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0INSTALL-GAMESAVEHUB-CLIENT.ps1" -EnableWgsTransfer
 set INSTALL_RESULT=%errorlevel%
 
 echo.

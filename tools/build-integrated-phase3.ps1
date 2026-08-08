@@ -80,7 +80,17 @@ function Test-Phase3Guards {
     if ($portainer -notmatch 'FeatureGates__AllowHostTransfer:\s*"false"') { throw 'Feature gate serveur Portainer ouvert par erreur.' }
     if ($compose -notmatch 'GSH_ALLOW_HOST_TRANSFER:-false') { throw 'Valeur par defaut du feature gate Docker modifiee.' }
     if ($serviceSettings -notmatch '"EnableWgsTransfer"\s*:\s*false') { throw 'Gate WGS local ouvert dans appsettings.' }
-    if ($installer -notmatch 'EnableWgsTransfer\s*=\s*\$false') { throw 'Gate WGS local ouvert dans l installateur.' }
+    # Le verrou local doit venir du commutateur, jamais d une valeur en dur.
+    # Un [switch] est absent par defaut : c est ce qui garantit un package standard ferme.
+    if ($installer -notmatch '\[switch\]\$EnableWgsTransfer') {
+        throw 'Le verrou WGS local n est plus un commutateur : le defaut ferme n est plus garanti.'
+    }
+    if ($installer -notmatch 'EnableWgsTransfer = \[bool\]\$EnableWgsTransfer') {
+        throw 'Le verrou WGS local n est pas alimente par le parametre.'
+    }
+    if ($installer -match 'EnableWgsTransfer\s*=\s*\$true') {
+        throw 'Verrou WGS local ouvert en dur dans l installateur.'
+    }
     Write-Host 'Double gate : serveur=false et client WGS=false'
 
     $contracts = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Contracts\ApiContracts.cs') -Raw
@@ -299,7 +309,7 @@ if ($PilotTransfer) {
 
     # Garde-fou croise : verifier que chaque package porte bien le verrou attendu.
     $pilotCmd = Get-Content -LiteralPath (Join-Path $pilotPackage 'INSTALLER-GAMESAVEHUB-PILOTE.cmd') -Raw
-    if ($pilotCmd -notmatch '-EnableWgsTransfer \$true') {
+    if ($pilotCmd -notmatch 'INSTALL-GAMESAVEHUB-CLIENT\.ps1" -EnableWgsTransfer') {
         throw 'La variante pilote n ouvre pas le verrou : elle serait identique au package standard.'
     }
     if (Test-Path -LiteralPath (Join-Path $clientPackage 'INSTALLER-GAMESAVEHUB-PILOTE.cmd')) {
