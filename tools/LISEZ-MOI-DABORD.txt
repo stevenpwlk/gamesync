@@ -1,0 +1,60 @@
+GameSave Hub - installation
+===========================
+
+Ce programme permet de partager une sauvegarde The Planet Crafter
+entre plusieurs PC.
+
+
+CE QU IL FAUT FAIRE
+-------------------
+
+1. Extraire ce dossier quelque part (Bureau, Telechargements, peu importe).
+   Important : extraire d abord. Ne pas lancer le programme depuis
+   l interieur du fichier ZIP.
+
+2. Double-cliquer sur :
+
+      INSTALLER-GAMESAVEHUB.cmd
+
+3. Windows demande une autorisation dans une fenetre bleue.
+   Repondre Oui.
+
+4. Attendre le message INSTALLATION TERMINEE.
+   L application s ouvre toute seule.
+
+5. Dans l application, remplir :
+      - Pseudo Planet Crafter : votre pseudo exact dans le jeu
+      - Code d invitation : celui que Steven vous a envoye
+
+   Puis cliquer sur "Associer ce PC".
+
+C est tout. Il n y a rien d autre a faire.
+
+
+SI WINDOWS AFFICHE UN AVERTISSEMENT
+-----------------------------------
+
+Windows peut afficher "Windows a protege votre ordinateur", parce que
+le programme n est pas signe par un editeur connu.
+
+Cliquer sur "Informations complementaires", puis "Executer quand meme".
+
+
+CE QUE LE PROGRAMME FAIT, ET NE FAIT PAS
+----------------------------------------
+
+Dans cette version, GameSave Hub peut uniquement CONSULTER les
+sauvegardes disponibles. Il ne peut rien ecrire dans vos parties.
+
+L ecriture est volontairement desactivee et le restera tant que
+Steven ne l aura pas activee explicitement. Vos sauvegardes
+existantes ne risquent rien.
+
+
+EN CAS DE PROBLEME
+------------------
+
+Faire une capture d ecran de la fenetre et l envoyer a Steven.
+
+Pour tout desinstaller : clic droit sur UNINSTALL-GAMESAVEHUB-CLIENT.ps1
+puis "Executer avec PowerShell", en tant qu administrateur.

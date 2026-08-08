@@ -255,6 +255,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Publication du service Windows echouee.' }
 if ($LASTEXITCODE -ne 0) { throw 'Publication de l application WPF echouee.' }
 
 Copy-Item -LiteralPath '.\src\GameSaveHub.Client.Service\appsettings.json' -Destination (Join-Path $serviceOut 'appsettings.json') -Force
+Copy-Item -LiteralPath '.\tools\INSTALLER-GAMESAVEHUB.cmd' -Destination $clientPackage -Force
+Copy-Item -LiteralPath '.\tools\LISEZ-MOI-DABORD.txt' -Destination $clientPackage -Force
 Copy-Item -LiteralPath '.\tools\INSTALL-GAMESAVEHUB-CLIENT.ps1' -Destination $clientPackage -Force
 Copy-Item -LiteralPath '.\tools\UNINSTALL-GAMESAVEHUB-CLIENT.ps1' -Destination $clientPackage -Force
 Copy-Item -LiteralPath '.\tools\STATUS-GAMESAVEHUB-CLIENT.ps1' -Destination $clientPackage -Force
