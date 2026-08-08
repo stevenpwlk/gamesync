@@ -88,6 +88,56 @@ La sûreté tient (point vérifié plus haut : le service rejoue le préflight),
 
 ---
 
+---
+
+## Ce que seule l'exécution réelle a révélé
+
+Les défauts ci-dessus ont été trouvés à la lecture. Les deux suivants ne pouvaient pas l'être : ils ne se manifestent qu'avec un service réellement installé, et **ils rendaient l'application totalement inutilisable** — aucun bouton ne fonctionnait, chaque action affichant `Pipe is broken`.
+
+Le code du named pipe existait depuis la Phase 2 et n'avait, de toute évidence, jamais été exécuté contre un service installé.
+
+### 🔴 Le contrôle d'identité précédait la lecture du canal
+
+```text
+System.IO.IOException: Impossible d'emprunter une identité en utilisant un canal
+de communication nommé tant qu'aucune donnée n'a été lue dans ce canal.
+   at NamedPipeServerStream.RunAsClient(...)
+   at PipeServerWorker.GetConnectedSid(...)
+```
+
+Windows n'autorise `ImpersonateNamedPipeClient` qu'**après** lecture d'au moins une donnée sur le canal. Le service appelait `RunAsClient` juste après avoir accepté la connexion. L'appel échouait donc systématiquement, pour tout client, depuis toujours.
+
+Séquence corrigée : **lecture → contrôle du SID → exécution**. La propriété de sûreté est préservée — la requête n'est même pas désérialisée avant le contrôle — et un client non autorisé reçoit désormais un refus explicite plutôt qu'une déconnexion brutale.
+
+### 🔴 Assembly chargée trop tard, dans un exécutable mono-fichier
+
+Corriger le point précédent n'a fait que révéler l'erreur suivante :
+
+```text
+System.IO.FileNotFoundException: 'System.Security.Claims, Version=10.0.0.0'
+   at PipeServerWorker.GetConnectedSid → RunAsClient
+```
+
+Le service est publié en exécutable mono-fichier auto-contenu. Une assembly chargée pour la **première fois à l'intérieur** de `RunAsClient` échoue : la résolution intervient alors que le thread porte le jeton du client. `WindowsIdentity` dérivant de `ClaimsIdentity`, le type était résolu trop tard.
+
+La piste des permissions a été écartée par la mesure et non par raisonnement : `BUILTIN\Utilisateurs` dispose bien de `ReadAndExecute` sur le binaire, et l'ouverture en lecture depuis le compte joueur réussit.
+
+`PreloadIdentityAssemblies()` touche `WindowsIdentity` dans le contexte du service, avant la boucle d'écoute.
+
+### Leçon, et garde-fous ajoutés
+
+Ces deux défauts ont un point commun : **ils étaient invisibles à la compilation, aux 96 tests unitaires et à la relecture**. Seul un service installé, sollicité par une vraie application, pouvait les faire apparaître. Un test unitaire ne peut pas couvrir l'usurpation d'identité sur un named pipe ni le chargement d'assembly en mono-fichier.
+
+D'où trois contrôles statiques ajoutés à `Test-Phase3Guards`, qui échouent à la compilation si :
+
+- le contrôle du SID repasse avant la lecture du canal ;
+- une commande peut s'exécuter avant ce contrôle ;
+- le préchargement des assemblies d'identité disparaît ou passe après le contrôle.
+
+Et une méthode de validation : le binaire **exact du package** est démarré avec un pipe de test, puis sollicité par un vrai client nommé sur `status`, `server-health`, `transfer-active` et `world-list`. Les quatre doivent répondre correctement. C'est ce qui aurait dû être fait avant la première livraison.
+
+---
+
 ## Architecture — ce que je remettrais en question
 
 ### Construire l'image sur le NAS est le mauvais choix
