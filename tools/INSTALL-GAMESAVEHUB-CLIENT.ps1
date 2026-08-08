@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ServerBaseUrl = "https://saves.stevenpwlk.fr:18443/"
 )
 

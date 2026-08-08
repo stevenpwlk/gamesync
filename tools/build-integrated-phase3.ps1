@@ -182,7 +182,23 @@ function Test-Phase3Guards {
         throw 'Filet de securite global absent de App.xaml.'
     }
 
-    Write-Host 'Assistant de transfert complet, gestion d erreur et culture numerique : valides'
+    # Windows PowerShell 5.1 lit un .ps1 sans BOM comme de l ANSI : tout accent UTF-8
+    # y devient illisible. Les scripts destines a l utilisateur final doivent donc
+    # porter un BOM, sans quoi INSTALLATION REUSSIE s affiche mutile a distance.
+    # Ce script-ci reste volontairement en ASCII pur, comme le reste de ses messages.
+    $bom = [byte[]](0xEF, 0xBB, 0xBF)
+    foreach ($script in Get-ChildItem -LiteralPath (Join-Path $repo 'tools') -Filter '*.ps1' -File) {
+        $bytes = [IO.File]::ReadAllBytes($script.FullName)
+        $hasNonAscii = $bytes | Where-Object { $_ -gt 127 } | Select-Object -First 1
+        if (-not $hasNonAscii) { continue }
+        $startsWithBom = $bytes.Length -ge 3 -and
+                         $bytes[0] -eq $bom[0] -and $bytes[1] -eq $bom[1] -and $bytes[2] -eq $bom[2]
+        if (-not $startsWithBom) {
+            throw "Script accentue sans BOM UTF-8 : $($script.Name). Les accents seraient illisibles sous PowerShell 5.1."
+        }
+    }
+
+    Write-Host 'Assistant de transfert complet, gestion d erreur, encodage des scripts et culture numerique : valides'
 }
 
 Write-Host "`n=== GameSave Hub - Integrated Client Phase 3 / 0.3.0 r2 ===" -ForegroundColor Cyan

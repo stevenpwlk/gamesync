@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 Write-Host "=== GameSave Hub Client — état local ===" -ForegroundColor Cyan
 $service = Get-Service -Name "GameSaveHubClient" -ErrorAction SilentlyContinue
