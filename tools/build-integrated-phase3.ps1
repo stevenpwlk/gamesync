@@ -261,7 +261,7 @@ Write-Host "Taille            : $apiTarBytes octets"
 Write-Host "SHA-256           : $apiHash"
 
 Write-Host "`nVALIDATION PHASE 3 TERMINEE" -ForegroundColor Green
-Write-Host 'Attendu : 70 tests reussis, 0 echec.'
+Write-Host 'Attendu : 0 echec, au moins 70 cas de test executes.'
 Write-Host 'Attendu : canPrepareForHost=true, canImportPortableArtifact=true, canLaunchGame=false.'
 Write-Host 'IMPORTANT : FeatureGates__AllowHostTransfer=false ET EnableWgsTransfer=false.'
 Write-Host 'Ce build ne contacte pas le NAS et n ecrit pas dans WGS.'
