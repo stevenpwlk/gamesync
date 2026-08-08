@@ -1,0 +1,21 @@
+name: gamesavehub-admin-world-list-temp
+
+services:
+  admin:
+    image: gamesavehub-admin:0.1.0
+    command: ["world", "list"]
+    environment:
+      GSH_CONNECTION_STRING: Data Source=/data/gamesavehub.db;Cache=Shared;Pooling=True
+      GSH_STORAGE_ROOT: /data
+      GSH_MAX_ARTIFACT_BYTES: 67108864
+    volumes:
+      - /Volume2/gamesavehub/data:/data
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  backend:
+    external: true
+    name: gamesavehub_backend

@@ -1,0 +1,20 @@
+bin/
+obj/
+.vs/
+TestResults/
+artifacts/
+*.user
+*.suo
+*.pfx
+*.key
+*.pem
+.env
+diagnostics-output/
+snapshots/
+deploy/secrets/*
+!deploy/secrets/README.md
+deploy/.env
+
+# Mémoire du projet : archives de livraison, contextes de build, conversations.
+# Conservées sur disque, volontairement hors Git (voir _archive/README.md).
+_archive/

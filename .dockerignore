@@ -1,0 +1,17 @@
+.git
+.vs
+.vscode
+.idea
+**/bin
+**/obj
+artifacts
+snapshots
+diagnostics-output
+tests
+tools
+docs
+deploy/.env
+deploy/secrets
+*.user
+*.suo
+

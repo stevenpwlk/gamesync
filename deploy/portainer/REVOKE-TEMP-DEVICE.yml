@@ -1,0 +1,22 @@
+name: gamesavehub-revoke-temp-device
+
+services:
+  admin:
+    image: gamesavehub-admin:0.1.0
+    command:
+      - device
+      - revoke
+      - bf7e13ed-0ad1-4aca-8ee2-8cd4d3826991
+    environment:
+      GSH_CONNECTION_STRING: Data Source=/data/gamesavehub.db;Cache=Shared;Pooling=True
+    volumes:
+      - /Volume2/gamesavehub/data:/data
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  backend:
+    external: true
+    name: gamesavehub_backend

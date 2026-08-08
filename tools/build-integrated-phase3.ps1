@@ -1,0 +1,233 @@
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
+$repo = Split-Path -Parent $PSScriptRoot
+Set-Location $repo
+
+function Invoke-DotnetStep {
+    param(
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+    Write-Host "`n=== $Label ===" -ForegroundColor Cyan
+    & dotnet @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "La commande dotnet a echoue pendant : $Label"
+    }
+}
+
+function Test-SourceManifest {
+    $manifestPath = Join-Path $repo 'SOURCE-SHA256SUMS.txt'
+    if (-not (Test-Path -LiteralPath $manifestPath)) {
+        throw 'SOURCE-SHA256SUMS.txt est absent.'
+    }
+
+    $count = 0
+    foreach ($line in Get-Content -LiteralPath $manifestPath) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        if ($line -notmatch '^([0-9a-fA-F]{64}) \*(.+)$') {
+            throw "Ligne de manifeste invalide : $line"
+        }
+        $expected = $Matches[1].ToLowerInvariant()
+        $relative = $Matches[2].Replace('/', [IO.Path]::DirectorySeparatorChar)
+        $path = Join-Path $repo $relative
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Fichier source absent : $relative"
+        }
+        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+        if ($actual -ne $expected) {
+            throw "Hash source invalide : $relative"
+        }
+        $count++
+    }
+    Write-Host "$count fichiers source : hashes valides"
+}
+
+function Test-Phase3Guards {
+    Write-Host "`n=== Garde-fous statiques Phase 3 ===" -ForegroundColor Cyan
+
+    $unitFiles = Get-ChildItem -LiteralPath (Join-Path $repo 'tests\Unit') -Filter '*.cs' -File
+    $facts = 0
+    $inline = 0
+    foreach ($file in $unitFiles) {
+        $text = Get-Content -LiteralPath $file.FullName -Raw
+        $facts += ([regex]::Matches($text, '\[Fact\]')).Count
+        $inline += ([regex]::Matches($text, '\[InlineData')).Count
+    }
+    $cases = $facts + $inline
+    if ($cases -ne 70) {
+        throw "Nombre de cas de test inattendu : $cases (attendu : 70)."
+    }
+    Write-Host "70 cas de test unitaires declares"
+
+    $apiSettings = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Server.Api\appsettings.json') -Raw
+    $portainer = Get-Content -LiteralPath (Join-Path $repo 'deploy\compose.portainer.yml') -Raw
+    $compose = Get-Content -LiteralPath (Join-Path $repo 'deploy\compose.yml') -Raw
+    $serviceSettings = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.Service\appsettings.json') -Raw
+    $installer = Get-Content -LiteralPath (Join-Path $repo 'tools\INSTALL-GAMESAVEHUB-CLIENT.ps1') -Raw
+
+    if ($apiSettings -notmatch '"AllowHostTransfer"\s*:\s*false') { throw 'Feature gate serveur API ouvert par erreur.' }
+    if ($portainer -notmatch 'FeatureGates__AllowHostTransfer:\s*"false"') { throw 'Feature gate serveur Portainer ouvert par erreur.' }
+    if ($compose -notmatch 'GSH_ALLOW_HOST_TRANSFER:-false') { throw 'Valeur par defaut du feature gate Docker modifiee.' }
+    if ($serviceSettings -notmatch '"EnableWgsTransfer"\s*:\s*false') { throw 'Gate WGS local ouvert dans appsettings.' }
+    if ($installer -notmatch 'EnableWgsTransfer\s*=\s*\$false') { throw 'Gate WGS local ouvert dans l installateur.' }
+    Write-Host 'Double gate : serveur=false et client WGS=false'
+
+    $contracts = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Contracts\ApiContracts.cs') -Raw
+    $compatibility = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Contracts\PlayerCompatibilityRules.cs') -Raw
+    $server = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Server.Api\Program.cs') -Raw
+    $validator = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Server.Infrastructure\ArtifactEnvelopeValidator.cs') -Raw
+    $pipe = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.Service\PipeServerWorker.cs') -Raw
+    $serviceProgram = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.Service\Program.cs') -Raw
+    $identity = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.Service\DeviceIdentity.cs') -Raw
+    $httpClient = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.Service\AuthenticatedTransferServerClient.cs') -Raw
+
+    foreach ($required in @('WorldCatalogItemResponse', 'WorldPreviewResponse', 'WorldPreviewPlayerResponse')) {
+        if ($contracts -notmatch $required) { throw "Contrat Phase 3 absent : $required" }
+    }
+    if ($compatibility -notmatch 'PlayerNotFound' -or $compatibility -notmatch 'PlayerAmbiguous') {
+        throw 'Garde-fou pseudo absent/ambigu absent.'
+    }
+    if ($server -notmatch 'MapGet\("/worlds"' -or $server -notmatch 'MapGet\("/worlds/\{id:guid\}/preview"') {
+        throw 'Endpoints catalogue/preview absents.'
+    }
+    if ($validator -notmatch 'ReadSummaryAsync' -or $validator -notmatch 'ArtifactEnvelopePlayerSummary') {
+        throw 'Lecture securisee du manifeste serveur absente.'
+    }
+    if ($pipe -notmatch '"preflight"' -or $pipe -notmatch 'local_transfer_gate_closed') {
+        throw 'Preflight ou gate WGS local absent du service.'
+    }
+    if ($pipe -notmatch 'PlayerCompatibilityRules\.Evaluate') {
+        throw 'Validation du pseudo serveur absente.'
+    }
+    if ($serviceProgram -notmatch 'appsettings\.local\.json') {
+        throw 'Chargement de la configuration locale installateur absent.'
+    }
+    if ($identity -notmatch 'CngExportPolicies\.None' -or $identity -notmatch 'CngKeyCreationOptions\.MachineKey') {
+        throw 'Identite CNG persistante non exportable absente.'
+    }
+    if ($httpClient -notmatch 'ListWorldsAsync' -or $httpClient -notmatch 'GetWorldPreviewAsync') {
+        throw 'Client HTTP catalogue/preview absent.'
+    }
+    Write-Host 'Catalogue NAS, preview, pseudo obligatoire et identite CNG : presents'
+
+    $migrations = Get-ChildItem -LiteralPath (Join-Path $repo 'src\GameSaveHub.Server.Infrastructure\Migrations') -Filter '*.cs' -File |
+        Where-Object { $_.Name -notmatch '\.Designer\.cs$' -and $_.Name -ne 'GameSaveHubDbContextModelSnapshot.cs' }
+    if ($migrations.Count -ne 4) {
+        throw "Nombre de migrations EF inattendu : $($migrations.Count) (4 attendu, aucune migration Phase 3)."
+    }
+    Write-Host 'Base SQLite : aucune nouvelle migration Phase 3'
+
+    foreach ($bad in @('DangerousAcceptAnyServerCertificateValidator', 'ServerCertificateCustomValidationCallback')) {
+        if ($httpClient -match $bad) { throw "Bypass TLS interdit detecte : $bad" }
+    }
+    if ($httpClient -notmatch 'EnsureMutationIdempotency\(request\)') {
+        throw 'Idempotence HTTP r3 absente.'
+    }
+
+    $badTestNames = @()
+    foreach ($file in $unitFiles) {
+        $text = Get-Content -LiteralPath $file.FullName -Raw
+        foreach ($match in [regex]::Matches($text, 'public\s+(?:async\s+)?(?:Task|void)\s+([A-Za-z0-9]+_[A-Za-z0-9_]+)\s*\(')) {
+            $badTestNames += $match.Groups[1].Value
+        }
+    }
+    if ($badTestNames.Count -gt 0) {
+        throw "Noms de tests incompatibles avec CA1707 : $($badTestNames -join ', ')"
+    }
+
+    if ($installer -notmatch 'ProfileList' -or $installer -notmatch 'RegisteredUserSid' -or $installer -notmatch 'GameSaveHubClient') {
+        throw 'Installateur service/SID incomplet.'
+    }
+
+    $clientMainWindow = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.App\MainWindow.xaml.cs') -Raw
+    if ($clientMainWindow -match 'GetInt64\(\)\.ToString\(\)') {
+        throw 'CA1305 : seed numerique sans culture explicite dans MainWindow.'
+    }
+    if ($clientMainWindow -notmatch 'GetInt64\(\)\.ToString\(System\.Globalization\.CultureInfo\.InvariantCulture\)') {
+        throw 'Formatage invariant de la seed absent dans MainWindow.'
+    }
+
+    Write-Host 'Installation Windows persistante, culture numerique et conventions analyseurs : valides'
+}
+
+Write-Host "`n=== GameSave Hub - Integrated Client Phase 3 / 0.3.0 r2 ===" -ForegroundColor Cyan
+$version = (& dotnet --version).Trim()
+if (-not $version.StartsWith('10.')) {
+    throw "SDK .NET 10 requis. Version detectee : $version"
+}
+Write-Host "SDK detecte : $version"
+
+Test-SourceManifest
+Test-Phase3Guards
+
+Invoke-DotnetStep '1/6 Restauration' @('restore', '.\GameSaveHub.slnx')
+Invoke-DotnetStep '2/6 Compilation complete' @('build', '.\GameSaveHub.slnx', '--configuration', 'Release', '--no-restore')
+Invoke-DotnetStep '3/6 Tests unitaires' @('test', '.\tests\Unit\GameSaveHub.UnitTests.csproj', '--configuration', 'Release', '--no-build', '--verbosity', 'normal')
+Invoke-DotnetStep '4/6 Capacites adapter' @('run', '--project', '.\src\GameSaveHub.Diagnostics\GameSaveHub.Diagnostics.csproj', '--configuration', 'Release', '--no-build', '--', 'capabilities')
+
+Write-Host "`n=== 5/6 Publication client Windows ===" -ForegroundColor Cyan
+$artifactRoot = Join-Path $repo 'artifacts'
+$clientPackage = Join-Path $artifactRoot 'GameSaveHub-Client-Phase3-0.3.0'
+$serviceOut = Join-Path $clientPackage 'Service'
+$appOut = Join-Path $clientPackage 'App'
+if (Test-Path -LiteralPath $clientPackage) { Remove-Item -LiteralPath $clientPackage -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $serviceOut, $appOut | Out-Null
+
+& dotnet publish '.\src\GameSaveHub.Client.Service\GameSaveHub.Client.Service.csproj' -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o $serviceOut
+if ($LASTEXITCODE -ne 0) { throw 'Publication du service Windows echouee.' }
+& dotnet publish '.\src\GameSaveHub.Client.App\GameSaveHub.Client.App.csproj' -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o $appOut
+if ($LASTEXITCODE -ne 0) { throw 'Publication de l application WPF echouee.' }
+
+Copy-Item -LiteralPath '.\src\GameSaveHub.Client.Service\appsettings.json' -Destination (Join-Path $serviceOut 'appsettings.json') -Force
+Copy-Item -LiteralPath '.\tools\INSTALL-GAMESAVEHUB-CLIENT.ps1' -Destination $clientPackage -Force
+Copy-Item -LiteralPath '.\tools\UNINSTALL-GAMESAVEHUB-CLIENT.ps1' -Destination $clientPackage -Force
+Copy-Item -LiteralPath '.\tools\STATUS-GAMESAVEHUB-CLIENT.ps1' -Destination $clientPackage -Force
+Copy-Item -LiteralPath '.\docs\operations\PHASE3-INTEGRATED-CLIENT.md' -Destination (Join-Path $clientPackage 'README-PHASE3.md') -Force
+
+$clientZip = Join-Path $artifactRoot 'GameSaveHub-Client-Phase3-0.3.0-win-x64.zip'
+if (Test-Path -LiteralPath $clientZip) { Remove-Item -LiteralPath $clientZip -Force }
+Compress-Archive -Path (Join-Path $clientPackage '*') -DestinationPath $clientZip -CompressionLevel Optimal
+$clientHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $clientZip).Hash.ToLowerInvariant()
+Set-Content -LiteralPath ($clientZip + '.sha256') -Encoding ASCII -Value "$clientHash *$(Split-Path -Leaf $clientZip)"
+Write-Host "Client ZIP : $clientZip"
+Write-Host "SHA-256    : $clientHash"
+
+Write-Host "`n=== 6/6 Contexte Docker API 0.3.0 ===" -ForegroundColor Cyan
+$apiTar = Join-Path $artifactRoot 'GameSaveHub-API-0.3.0-Portainer-Build-Context.tar'
+if (Test-Path -LiteralPath $apiTar) { Remove-Item -LiteralPath $apiTar -Force }
+
+# Cette etape arrive APRES la compilation : src/**/bin et src/**/obj sont donc pleins.
+# tar n'applique pas .dockerignore, et Portainer doit recevoir puis analyser tout le
+# contexte avant meme de lancer Docker. Sans exclusion explicite le contexte atteint
+# ~500 Mo au lieu de ~570 Ko, ce qui a fait echouer le build Portainer du 8 aout 2026.
+& tar.exe -cf $apiTar --exclude='bin' --exclude='obj' '.dockerignore' 'global.json' 'Directory.Build.props' 'src'
+if ($LASTEXITCODE -ne 0) { throw 'Creation du contexte Docker API echouee.' }
+
+# Garde-fou : refuser un contexte anormal plutot que de le decouvrir dans Portainer.
+$apiTarBytes = (Get-Item -LiteralPath $apiTar).Length
+$maxContextBytes = 20MB
+if ($apiTarBytes -gt $maxContextBytes) {
+    throw "Contexte Docker anormal : $([math]::Round($apiTarBytes / 1MB, 1)) Mo (limite $($maxContextBytes / 1MB) Mo). Des artefacts de compilation sont probablement inclus."
+}
+$apiTarEntries = & tar.exe -tf $apiTar
+if ($LASTEXITCODE -ne 0) { throw 'Relecture du contexte Docker API echouee.' }
+$polluted = $apiTarEntries | Where-Object { $_ -match '(^|/)(bin|obj)/' }
+if ($polluted) {
+    throw "Contexte Docker pollue par des artefacts de compilation : $($polluted[0])"
+}
+if (-not ($apiTarEntries -contains 'src/GameSaveHub.Server.Api/Dockerfile')) {
+    throw 'Dockerfile absent du contexte Docker API.'
+}
+
+$apiHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $apiTar).Hash.ToLowerInvariant()
+Set-Content -LiteralPath ($apiTar + '.sha256') -Encoding ASCII -Value "$apiHash *$(Split-Path -Leaf $apiTar)"
+Write-Host "API build context : $apiTar"
+Write-Host "Taille            : $apiTarBytes octets"
+Write-Host "SHA-256           : $apiHash"
+
+Write-Host "`nVALIDATION PHASE 3 TERMINEE" -ForegroundColor Green
+Write-Host 'Attendu : 70 tests reussis, 0 echec.'
+Write-Host 'Attendu : canPrepareForHost=true, canImportPortableArtifact=true, canLaunchGame=false.'
+Write-Host 'IMPORTANT : FeatureGates__AllowHostTransfer=false ET EnableWgsTransfer=false.'
+Write-Host 'Ce build ne contacte pas le NAS et n ecrit pas dans WGS.'

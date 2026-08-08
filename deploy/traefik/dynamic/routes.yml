@@ -1,0 +1,40 @@
+http:
+  routers:
+    gamesavehub-api:
+      rule: Host(`saves.stevenpwlk.fr`) && (PathPrefix(`/api/v1/`) || Path(`/healthz`))
+      entryPoints:
+        - gamesave
+      service: gamesavehub-api
+      middlewares:
+        - gamesavehub-security
+        - gamesavehub-limits
+        - gamesavehub-ratelimit
+      tls:
+        certResolver: ovh
+
+  services:
+    gamesavehub-api:
+      loadBalancer:
+        servers:
+          - url: http://api:8080
+
+  middlewares:
+    gamesavehub-security:
+      headers:
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: no-referrer
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        customResponseHeaders:
+          Server: ""
+    gamesavehub-limits:
+      buffering:
+        maxRequestBodyBytes: 268435456
+        memRequestBodyBytes: 4194304
+        retryExpression: IsNetworkError() && Attempts() < 2
+    gamesavehub-ratelimit:
+      rateLimit:
+        average: 30
+        burst: 60
+        period: 1s

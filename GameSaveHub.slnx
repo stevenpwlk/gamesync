@@ -1,0 +1,24 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/GameSaveHub.Adapters.Abstractions/GameSaveHub.Adapters.Abstractions.csproj" />
+    <Project Path="src/GameSaveHub.Adapters.PlanetCrafter.GamePass/GameSaveHub.Adapters.PlanetCrafter.GamePass.csproj" />
+    <Project Path="src/GameSaveHub.Client.App/GameSaveHub.Client.App.csproj" />
+    <Project Path="src/GameSaveHub.Client.Orchestration/GameSaveHub.Client.Orchestration.csproj" />
+    <Project Path="src/GameSaveHub.Client.Probe/GameSaveHub.Client.Probe.csproj" />
+    <Project Path="src/GameSaveHub.Client.Service/GameSaveHub.Client.Service.csproj" />
+    <Project Path="src/GameSaveHub.Contracts/GameSaveHub.Contracts.csproj" />
+    <Project Path="src/GameSaveHub.Core/GameSaveHub.Core.csproj" />
+    <Project Path="src/GameSaveHub.Diagnostics/GameSaveHub.Diagnostics.csproj" />
+    <Project Path="src/GameSaveHub.DynHost/GameSaveHub.DynHost.csproj" />
+    <Project Path="src/GameSaveHub.Server.Admin/GameSaveHub.Server.Admin.csproj" />
+    <Project Path="src/GameSaveHub.Server.Api/GameSaveHub.Server.Api.csproj" />
+    <Project Path="src/GameSaveHub.Server.Infrastructure/GameSaveHub.Server.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/EndToEnd/">
+    <Project Path="tests/EndToEnd/GameSaveHub.ApiSmoke/GameSaveHub.ApiSmoke.csproj" />
+  </Folder>
+  <Folder Name="/tests/Unit/">
+    <Project Path="tests/Unit/GameSaveHub.UnitTests.csproj" />
+  </Folder>
+</Solution>

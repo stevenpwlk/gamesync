@@ -1,0 +1,131 @@
+name: gamesavehub
+
+services:
+  traefik:
+    image: gamesavehub-traefik:0.1.0
+    restart: unless-stopped
+    command:
+      - --global.checknewversion=false
+      - --global.sendanonymoususage=false
+      - --api.dashboard=false
+      - --ping=true
+      - --entrypoints.gamesave.address=:8443
+      - --entrypoints.gamesave.transport.respondingtimeouts.readtimeout=120s
+      - --entrypoints.gamesave.transport.respondingtimeouts.writetimeout=300s
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=false
+      - --certificatesresolvers.ovh.acme.email=pawlak.steven@gmail.com
+      - --certificatesresolvers.ovh.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.ovh.acme.dnschallenge=true
+      - --certificatesresolvers.ovh.acme.dnschallenge.provider=ovh
+      - --certificatesresolvers.ovh.acme.dnschallenge.propagation.delaybeforechecks=30s
+      - --accesslog=true
+      - --accesslog.format=json
+      - --log.format=json
+      - --log.level=INFO
+    environment:
+      OVH_ENDPOINT: ovh-eu
+      OVH_APPLICATION_KEY_FILE: /run/secrets/ovh_application_key
+      OVH_APPLICATION_SECRET_FILE: /run/secrets/ovh_application_secret
+      OVH_CONSUMER_KEY_FILE: /run/secrets/ovh_consumer_key
+    ports:
+      - "8443:8443"
+      - "18443:8443"
+    volumes:
+      - /Volume2/gamesavehub/letsencrypt-production:/letsencrypt
+    secrets:
+      - ovh_application_key
+      - ovh_application_secret
+      - ovh_consumer_key
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    image: gamesavehub-api:0.3.0
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__GameSaveHub: Data Source=/data/gamesavehub.db;Cache=Shared;Pooling=True
+      Storage__Root: /data
+      Storage__MaxArtifactBytes: 67108864
+      Storage__MaxChunkBytes: 4194304
+      FeatureGates__AllowHostTransfer: "false"
+      Authentication__Issuer: GameSaveHub
+      Authentication__Audience: GameSaveHub.Client
+    volumes:
+      - /Volume2/gamesavehub/data:/data
+    secrets:
+      - source: gsh_signing_key
+        target: Authentication__SigningKey
+    networks:
+      - edge
+      - backend
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+
+  dynhost:
+    image: gamesavehub-dynhost:0.1.0
+    restart: unless-stopped
+    environment:
+      DYNHOST_HOSTNAME: saves.stevenpwlk.fr
+      DYNHOST_INTERVAL_SECONDS: 300
+      DYNHOST_USERNAME_FILE: /run/secrets/dynhost_username
+      DYNHOST_PASSWORD_FILE: /run/secrets/dynhost_password
+    secrets:
+      - dynhost_username
+      - dynhost_password
+    networks:
+      - edge
+    security_opt:
+      - no-new-privileges:true
+
+  admin:
+    profiles: ["tools"]
+    image: gamesavehub-admin:0.1.0
+    environment:
+      GSH_CONNECTION_STRING: Data Source=/data/gamesavehub.db;Cache=Shared;Pooling=True
+      GSH_STORAGE_ROOT: /data
+      GSH_MAX_ARTIFACT_BYTES: 67108864
+      GSH_RETENTION_LATEST: 20
+      GSH_RETENTION_DAILY: 30
+      GSH_RETENTION_WEEKLY: 26
+    volumes:
+      - /Volume2/gamesavehub/data:/data
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  edge:
+  backend:
+    internal: true
+
+secrets:
+  gsh_signing_key:
+    file: /Volume2/gamesavehub/secrets/gsh_signing_key
+  ovh_application_key:
+    file: /Volume2/gamesavehub/secrets/ovh_application_key
+  ovh_application_secret:
+    file: /Volume2/gamesavehub/secrets/ovh_application_secret
+  ovh_consumer_key:
+    file: /Volume2/gamesavehub/secrets/ovh_consumer_key
+  dynhost_username:
+    file: /Volume2/gamesavehub/secrets/dynhost_username
+  dynhost_password:
+    file: /Volume2/gamesavehub/secrets/dynhost_password

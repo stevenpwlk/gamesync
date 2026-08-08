@@ -1,0 +1,146 @@
+name: gamesavehub
+
+services:
+  traefik:
+    image: traefik:v3.7.10
+    restart: unless-stopped
+    command:
+      - --global.checknewversion=false
+      - --global.sendanonymoususage=false
+      - --api.dashboard=false
+      - --ping=true
+      - --entrypoints.gamesave.address=:8443
+      - --entrypoints.gamesave.transport.respondingtimeouts.readtimeout=120s
+      - --entrypoints.gamesave.transport.respondingtimeouts.writetimeout=300s
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --certificatesresolvers.ovh.acme.email=${ACME_EMAIL:?ACME_EMAIL requis}
+      - --certificatesresolvers.ovh.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.ovh.acme.caserver=${ACME_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
+      - --certificatesresolvers.ovh.acme.dnschallenge=true
+      - --certificatesresolvers.ovh.acme.dnschallenge.provider=ovh
+      - --certificatesresolvers.ovh.acme.dnschallenge.delaybeforecheck=30s
+      - --accesslog=true
+      - --accesslog.format=json
+      - --log.format=json
+      - --log.level=INFO
+    environment:
+      OVH_ENDPOINT: ovh-eu
+      OVH_APPLICATION_KEY_FILE: /run/secrets/ovh_application_key
+      OVH_APPLICATION_SECRET_FILE: /run/secrets/ovh_application_secret
+      OVH_CONSUMER_KEY_FILE: /run/secrets/ovh_consumer_key
+    ports:
+      - target: 8443
+        published: "${NAS_TLS_PORT:-8443}"
+        protocol: tcp
+      - target: 8443
+        published: "${NAS_LAN_TLS_PORT:-18443}"
+        protocol: tcp
+    volumes:
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - ${GSH_ACME_PATH:?GSH_ACME_PATH requis}:/letsencrypt
+    secrets:
+      - ovh_application_key
+      - ovh_application_secret
+      - ovh_consumer_key
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    build:
+      context: ..
+      dockerfile: src/GameSaveHub.Server.Api/Dockerfile
+    image: gamesavehub-api:${GSH_VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__GameSaveHub: Data Source=/data/gamesavehub.db;Cache=Shared;Pooling=True
+      Storage__Root: /data
+      Storage__MaxArtifactBytes: ${GSH_MAX_ARTIFACT_BYTES:-67108864}
+      Storage__MaxChunkBytes: ${GSH_MAX_CHUNK_BYTES:-4194304}
+      FeatureGates__AllowHostTransfer: ${GSH_ALLOW_HOST_TRANSFER:-false}
+      Authentication__Issuer: GameSaveHub
+      Authentication__Audience: GameSaveHub.Client
+    volumes:
+      - ${GSH_DATA_PATH:?GSH_DATA_PATH requis}:/data
+    secrets:
+      - source: gsh_signing_key
+        target: Authentication__SigningKey
+    networks:
+      - edge
+      - backend
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+
+  dynhost:
+    build:
+      context: ..
+      dockerfile: src/GameSaveHub.DynHost/Dockerfile
+    image: gamesavehub-dynhost:${GSH_VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      DYNHOST_HOSTNAME: ${GSH_HOSTNAME:-saves.stevenpwlk.fr}
+      DYNHOST_INTERVAL_SECONDS: ${DYNHOST_INTERVAL_SECONDS:-300}
+      DYNHOST_USERNAME_FILE: /run/secrets/dynhost_username
+      DYNHOST_PASSWORD_FILE: /run/secrets/dynhost_password
+    secrets:
+      - dynhost_username
+      - dynhost_password
+    networks:
+      - edge
+    security_opt:
+      - no-new-privileges:true
+
+  admin:
+    profiles: ["tools"]
+    build:
+      context: ..
+      dockerfile: src/GameSaveHub.Server.Admin/Dockerfile
+    image: gamesavehub-admin:${GSH_VERSION:-dev}
+    environment:
+      GSH_CONNECTION_STRING: Data Source=/data/gamesavehub.db;Cache=Shared;Pooling=True
+      GSH_STORAGE_ROOT: /data
+      GSH_MAX_ARTIFACT_BYTES: ${GSH_MAX_ARTIFACT_BYTES:-67108864}
+      GSH_RETENTION_LATEST: ${GSH_RETENTION_LATEST:-20}
+      GSH_RETENTION_DAILY: ${GSH_RETENTION_DAILY:-30}
+      GSH_RETENTION_WEEKLY: ${GSH_RETENTION_WEEKLY:-26}
+    volumes:
+      - ${GSH_DATA_PATH:?GSH_DATA_PATH requis}:/data
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  edge:
+  backend:
+    internal: true
+
+secrets:
+  gsh_signing_key:
+    file: ${GSH_SECRETS_PATH:?GSH_SECRETS_PATH requis}/gsh_signing_key
+  ovh_application_key:
+    file: ${GSH_SECRETS_PATH:?GSH_SECRETS_PATH requis}/ovh_application_key
+  ovh_application_secret:
+    file: ${GSH_SECRETS_PATH:?GSH_SECRETS_PATH requis}/ovh_application_secret
+  ovh_consumer_key:
+    file: ${GSH_SECRETS_PATH:?GSH_SECRETS_PATH requis}/ovh_consumer_key
+  dynhost_username:
+    file: ${GSH_SECRETS_PATH:?GSH_SECRETS_PATH requis}/dynhost_username
+  dynhost_password:
+    file: ${GSH_SECRETS_PATH:?GSH_SECRETS_PATH requis}/dynhost_password
