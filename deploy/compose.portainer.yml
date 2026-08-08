@@ -48,7 +48,11 @@ services:
       - no-new-privileges:true
 
   api:
-    image: gamesavehub-api:0.3.0
+    # Image construite et publiée par .github/workflows/api-image.yml, tirée depuis GHCR.
+    # Le paquet est public : le NAS n'a aucun identifiant à stocker.
+    # Rollback : remettre gamesavehub-api:0.2.0, conservée localement sur le NAS.
+    # Aucune migration SQLite n'est ajoutée en 0.3.0, le retour arrière est direct.
+    image: ghcr.io/stevenpwlk/gamesavehub-api:0.3.0
     restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
