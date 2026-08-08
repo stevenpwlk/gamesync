@@ -117,6 +117,16 @@ function Test-Phase3Guards {
     if ($dispatchIndex -lt $sidIndex) {
         throw 'Une commande serait executee avant le controle du SID appelant.'
     }
+    # Le service est publie en executable mono-fichier. Une assembly chargee pour la
+    # premiere fois A L INTERIEUR de RunAsClient echoue (FileNotFoundException sur
+    # System.Security.Claims) : le prechargement hors usurpation est obligatoire.
+    $preloadIndex = $pipe.IndexOf('PreloadIdentityAssemblies();')
+    if ($preloadIndex -lt 0) {
+        throw 'Prechargement des assemblies d identite absent : le controle du SID echouera en mono-fichier.'
+    }
+    if ($preloadIndex -gt $sidIndex) {
+        throw 'Le prechargement des assemblies d identite doit preceder tout controle du SID.'
+    }
     if ($serviceProgram -notmatch 'appsettings\.local\.json') {
         throw 'Chargement de la configuration locale installateur absent.'
     }

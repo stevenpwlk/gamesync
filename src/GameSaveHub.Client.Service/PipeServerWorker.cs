@@ -24,6 +24,7 @@ public sealed partial class PipeServerWorker(
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Le service client nécessite Windows 11.");
         var expectedSid = ResolveSid(_options.RegisteredUserSid);
+        PreloadIdentityAssemblies();
         while (!stoppingToken.IsCancellationRequested)
         {
             await using var pipe = CreatePipe(expectedSid);
@@ -274,6 +275,26 @@ public sealed partial class PipeServerWorker(
             65536,
             65536,
             security);
+    }
+
+    /// <summary>
+    /// Force le chargement des assemblies d'identité avant toute usurpation.
+    /// </summary>
+    /// <remarks>
+    /// Le service est publié en exécutable mono-fichier. Une assembly chargée
+    /// paresseusement pour la première fois <em>à l'intérieur</em> de
+    /// <see cref="NamedPipeServerStream.RunAsClient"/> échoue avec
+    /// <c>FileNotFoundException: System.Security.Claims</c> : la résolution
+    /// intervient alors que le thread porte le jeton du client.
+    /// <see cref="WindowsIdentity"/> dérivant de <c>ClaimsIdentity</c>, le simple fait
+    /// d'y toucher ici, dans le contexte du service, suffit à ce que le type soit déjà
+    /// résolu au moment du contrôle d'identité.
+    /// </remarks>
+    private static void PreloadIdentityAssemblies()
+    {
+        using var current = WindowsIdentity.GetCurrent(TokenAccessLevels.Query);
+        _ = current.User;
+        _ = typeof(System.Security.Claims.ClaimsIdentity).Assembly.FullName;
     }
 
     private static SecurityIdentifier GetConnectedSid(NamedPipeServerStream pipe)
