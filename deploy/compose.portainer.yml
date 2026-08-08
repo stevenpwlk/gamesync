@@ -52,9 +52,9 @@ services:
   api:
     # Image construite et publiée par .github/workflows/api-image.yml, tirée depuis GHCR.
     # Le paquet est public : le NAS n'a aucun identifiant à stocker.
-    # Rollback : remettre gamesavehub-api:0.2.0, conservée localement sur le NAS.
-    # Aucune migration SQLite n'est ajoutée en 0.3.0, le retour arrière est direct.
-    image: ghcr.io/stevenpwlk/gamesavehub-api:0.3.0
+    # Rollback : remettre ghcr.io/stevenpwlk/gamesavehub-api:0.3.0, conservée sur le NAS.
+    # Aucune migration SQLite n'est ajoutée depuis la 0.3.0, le retour arrière est direct.
+    image: ghcr.io/stevenpwlk/gamesavehub-api:0.3.1
     labels:
       # Watchtower tourne sur ce NAS et a déjà redémarré cette API sans décision
       # humaine, le 8 août à 23:59, en remplaçant l'image validée. Un tel
@@ -69,6 +69,11 @@ services:
       Storage__Root: /data
       Storage__MaxArtifactBytes: 67108864
       Storage__MaxChunkBytes: 4194304
+      # ⚠ Ce fichier porte volontairement la valeur SÛRE. La stack réellement en
+      # service peut être ouverte à "true" pendant une campagne pilote : réappliquer
+      # ce fichier tel quel refermerait alors le verrou en pleine session, et un
+      # joueur en cours de transfert se verrait refuser sa publication.
+      # Vérifier l'état réel avant tout Update : docker inspect gamesavehub-api-1.
       FeatureGates__AllowHostTransfer: "false"
       Authentication__Issuer: GameSaveHub
       Authentication__Audience: GameSaveHub.Client

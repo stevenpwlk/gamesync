@@ -25,7 +25,10 @@ on:
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/gamesavehub-api
-  API_VERSION: 0.3.0
+  # À incrémenter à chaque changement déployable de l'API. Republier le même tag
+  # rendrait la version en service ambiguë : « 0.3.0 » ne désignerait plus un
+  # contenu précis, et le point de retour arrière deviendrait illusoire.
+  API_VERSION: 0.3.1
   # Plancher de non-régression : le nombre de cas peut augmenter, jamais diminuer.
   MINIMUM_TEST_CASES: 70
 
