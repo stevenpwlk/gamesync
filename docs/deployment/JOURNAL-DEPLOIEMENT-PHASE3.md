@@ -132,7 +132,7 @@ En cas de publication ratée, le retour se fait par `world restore <worldId> <ve
 ## Hygiène en attente
 
 - sauvegarde automatique de `data/` avec checkpoint WAL (aujourd'hui manuelle) ;
-- limites `mem_limit`/`cpus` sur les quatre services — le NAS héberge aussi Home Assistant ;
+- limites `mem_limit`/`cpus` sur les quatre services — le NAS héberge aussi la stack *arr, Jellyfin et un client torrent, pour 7,5 Gio de RAM au total ;
 - `/Volume2/gamesavehub/data` est en `777`, `750` suffirait en conservant l'accès à l'uid `100` ;
 - révocation du device de test `bf7e13ed-0ad1-4aca-8ee2-8cd4d3826991` et suppression des stacks temporaires ;
 - suppression des 6 mondes de test sur `PC-STEVEN`, **exclusivement depuis l'interface du jeu, en ligne**.

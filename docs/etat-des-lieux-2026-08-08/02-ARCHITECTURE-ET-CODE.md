@@ -226,6 +226,6 @@ Internet  saves.stevenpwlk.fr:18443 → NAT Livebox TCP → NAS:8443 → Traefik
 LAN       saves.stevenpwlk.fr:18443 → DNS local        → NAS:18443 → Traefik
 ```
 
-Aucune règle sur le port `443` : Home Assistant reste intact.
+Aucune règle sur le port `443` : les autres services du NAS restent intacts.
 
 Volumes NAS : `/Volume2/gamesavehub/{data,secrets,letsencrypt-production,letsencrypt-staging,backups,imports}`.

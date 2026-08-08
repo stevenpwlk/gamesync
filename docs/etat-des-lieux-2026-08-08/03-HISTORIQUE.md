@@ -56,7 +56,7 @@ Résultat vérifié :
 https://saves.stevenpwlk.fr:18443/healthz  →  Healthy
 ```
 
-Certificat Let's Encrypt de **production** valide (DNS-01 OVH), DynHost actif (`nochg 90.45.82.75`), NAT Livebox `TCP 18443 → NAS:8443`, IP `192.168.1.73` réservée en DHCP statique, port `443` intact pour Home Assistant. **Accès validé depuis un mobile en 5G, Wi-Fi coupé.**
+Certificat Let's Encrypt de **production** valide (DNS-01 OVH), DynHost actif (`nochg 90.45.82.75`), NAT Livebox `TCP 18443 → NAS:8443`, IP `192.168.1.73` réservée en DHCP statique, port `443` laissé intact. **Accès validé depuis un mobile en 5G, Wi-Fi coupé.**
 
 Deux défauts corrigés pendant le déploiement : publication Alpine en `linux-musl-x64`, et accès non-root aux secrets avec propriétaire `100:100` en conservant le mode `600`.
 

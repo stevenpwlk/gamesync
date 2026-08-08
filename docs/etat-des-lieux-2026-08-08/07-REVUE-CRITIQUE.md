@@ -156,7 +156,7 @@ Solution intermédiaire immédiate, sans CI : construire l'image sur le PC avec 
 ### Autres points d'infrastructure
 
 - **`--providers.file.watch=false`** dans Traefik : toute modification de `routes.yml` exige un redémarrage du conteneur. Volontaire pour la stabilité, mais à connaître avant de chercher pourquoi une route ne bouge pas.
-- **Aucune limite de ressources** (`mem_limit`, `cpus`) sur les quatre services, sur un NAS qui héberge aussi Home Assistant. Une fuite mémoire dans l'API peut affecter la domotique.
+- **Aucune limite de ressources** (`mem_limit`, `cpus`) sur les quatre services. Le NAS héberge aussi la stack *arr, Jellyfin et un client torrent, sur 7,5 Gio de RAM. Une fuite mémoire dans l'API affecterait tout le reste.
 - **Sauvegarde manuelle uniquement.** `DEPLOYMENT.md` documente quoi sauvegarder, mais rien ne l'exécute. Pour un système dont la raison d'être est de ne pas perdre de sauvegardes, un backup automatisé de `data/` avec checkpoint WAL est un prérequis de v1, pas une amélioration.
 - **`buffering` Traefik avec `maxRequestBodyBytes` à 256 Mio** alors que `Storage__MaxChunkBytes` vaut 4 Mio. Aucun risque, mais la limite du proxy pourrait être alignée sur celle de l'application pour rejeter tôt.
 

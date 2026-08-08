@@ -9,11 +9,16 @@ name: API image
 on:
   push:
     branches: [main]
+    # Uniquement ce qui entre réellement dans l'image API. Auparavant tout `src/**`
+    # déclenchait la republication : un correctif d'IHM produisait une nouvelle
+    # image `:0.3.0`, que watchtower déployait ensuite sans décision humaine.
     paths:
-      - 'src/**'
+      - 'src/GameSaveHub.Server.Api/**'
+      - 'src/GameSaveHub.Server.Infrastructure/**'
+      - 'src/GameSaveHub.Contracts/**'
+      - 'src/GameSaveHub.Core/**'
       - 'global.json'
       - 'Directory.Build.props'
-      - 'GameSaveHub.slnx'
       - '.dockerignore'
       - '.github/workflows/api-image.yml'
   workflow_dispatch:

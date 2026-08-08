@@ -6,7 +6,7 @@ La stack expose uniquement Traefik. L'API et la CLI d'administration restent sur
 
 - Internet : `saves.stevenpwlk.fr:18443` → Livebox NAT TCP → `NAS:8443` → Traefik.
 - LAN : `saves.stevenpwlk.fr:18443` → DNS local → `NAS:18443` → Traefik.
-- Home Assistant : son port `443` reste inchangé.
+- Les autres services du NAS (stack *arr, Jellyfin, client torrent) et le port `443` restent inchangés.
 - Le transfert d'hôte est désactivé par défaut avec `GSH_ALLOW_HOST_TRANSFER=false`.
 
 ## Prérequis à relever

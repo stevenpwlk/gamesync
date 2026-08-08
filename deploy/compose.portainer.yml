@@ -3,6 +3,8 @@ name: gamesavehub
 services:
   traefik:
     image: gamesavehub-traefik:0.1.0
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
     restart: unless-stopped
     command:
       - --global.checknewversion=false
@@ -53,6 +55,13 @@ services:
     # Rollback : remettre gamesavehub-api:0.2.0, conservée localement sur le NAS.
     # Aucune migration SQLite n'est ajoutée en 0.3.0, le retour arrière est direct.
     image: ghcr.io/stevenpwlk/gamesavehub-api:0.3.0
+    labels:
+      # Watchtower tourne sur ce NAS et a déjà redémarré cette API sans décision
+      # humaine, le 8 août à 23:59, en remplaçant l'image validée. Un tel
+      # redémarrage pendant un transfert couperait la session d'un joueur au
+      # milieu d'un import ou d'une publication.
+      # La mise à jour de GameSave Hub doit rester un acte délibéré.
+      com.centurylinklabs.watchtower.enable: "false"
     restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
@@ -84,6 +93,8 @@ services:
 
   dynhost:
     image: gamesavehub-dynhost:0.1.0
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
     restart: unless-stopped
     environment:
       DYNHOST_HOSTNAME: saves.stevenpwlk.fr
