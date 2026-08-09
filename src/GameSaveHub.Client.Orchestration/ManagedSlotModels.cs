@@ -2,6 +2,24 @@ using GameSaveHub.Contracts;
 
 namespace GameSaveHub.Client.Orchestration;
 
+public enum ManagedSlotStatus
+{
+    Missing,
+    Ready,
+    RenamePending,
+    UnboundCandidate,
+    LegacyCandidate,
+    BoundSlotMissing,
+    BindingMismatch,
+    InvalidTopology,
+    Ambiguous
+}
+
+public sealed record ManagedSlotResolution(
+    ManagedSlotStatus Status,
+    DiscoveredWorld? Candidate,
+    string? SafetyStopCode);
+
 public sealed record ManagedSlotBinding(
     int SchemaVersion,
     string AdapterId,
