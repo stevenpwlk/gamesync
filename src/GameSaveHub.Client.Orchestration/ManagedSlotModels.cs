@@ -34,4 +34,33 @@ public sealed record ManagedSlotBinding(
             boundAtUtc,
             boundAtUtc,
             Array.Empty<DiscoveredPlayer>());
+
+    public bool Equals(ManagedSlotBinding? other) =>
+        ReferenceEquals(this, other) || other is not null
+        && SchemaVersion == other.SchemaVersion
+        && AdapterId == other.AdapterId
+        && PackageFamilyName == other.PackageFamilyName
+        && PlayerName == other.PlayerName
+        && LogicalName == other.LogicalName
+        && CurrentDisplayName == other.CurrentDisplayName
+        && DesiredDisplayName == other.DesiredDisplayName
+        && BoundAtUtc == other.BoundAtUtc
+        && LastValidatedAtUtc == other.LastValidatedAtUtc
+        && LastValidatedPlayers.SequenceEqual(other.LastValidatedPlayers);
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(SchemaVersion);
+        hash.Add(AdapterId);
+        hash.Add(PackageFamilyName);
+        hash.Add(PlayerName);
+        hash.Add(LogicalName);
+        hash.Add(CurrentDisplayName);
+        hash.Add(DesiredDisplayName);
+        hash.Add(BoundAtUtc);
+        hash.Add(LastValidatedAtUtc);
+        foreach (var player in LastValidatedPlayers) hash.Add(player);
+        return hash.ToHashCode();
+    }
 }
