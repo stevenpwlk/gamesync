@@ -8,6 +8,7 @@ enrollment create [durée-minutes]
 device list|revoke <device-id>
 world create <nom>|list
 world import <world-id> <fichier.gshsave>
+world replace <world-id> <fichier.gshsave> <version-courante-attendue> --source-player <pseudo> [--require-player <pseudo>] --reason <justification>
 world restore <world-id> <version-id> <justification>
 version list <world-id>|protect <version-id> <justification>
 retention plan|purge <world-id>
@@ -26,3 +27,5 @@ Une libération administrative exige une justification, place la session dans `F
 `retention plan` ne modifie rien. `retention purge` applique par défaut 20 dernières versions, 30 quotidiennes et 26 hebdomadaires. La version courante et toutes les versions protégées sont toujours conservées; un objet immuable n'est supprimé que lorsqu'aucune version ne le référence.
 
 Le serveur ne migre jamais automatiquement SQLite au démarrage. Une image API avec migrations en attente refuse de démarrer.
+
+Le remplacement d'un monde existant suit la procédure détaillée dans [REPLACE-PRIMARY-WORLD.md](REPLACE-PRIMARY-WORLD.md). Le modèle Portainer est fourni à titre préparatoire et ne doit pas être exécuté sans sauvegarde ni accord explicite.

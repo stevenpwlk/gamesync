@@ -1,6 +1,8 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using GameSaveHub.Adapters.PlanetCrafter.GamePass;
 
 namespace GameSaveHub.Server.Infrastructure;
 
@@ -53,6 +55,7 @@ public static class ArtifactEnvelopeValidator
 
         if (manifest.SchemaVersion != 1 ||
             manifest.AdapterId != "planet-crafter-pc-gamepass" ||
+            string.IsNullOrWhiteSpace(manifest.LogicalName) ||
             manifest.PayloadPath != payloadEntry.FullName ||
             manifest.PayloadLength != payloadEntry.Length ||
             string.IsNullOrWhiteSpace(manifest.PayloadSha256) ||
@@ -68,6 +71,25 @@ public static class ArtifactEnvelopeValidator
                 Convert.FromHexString(manifest.PayloadSha256)))
         {
             throw new InvalidOperationException("Hash du payload invalide.");
+        }
+
+        await using var semanticPayload = payloadEntry.Open();
+        using var reader = new StreamReader(
+            semanticPayload,
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true),
+            detectEncodingFromByteOrderMarks: false,
+            leaveOpen: false);
+        var text = await reader.ReadToEndAsync(cancellationToken);
+        var parsed = PlanetCrafterWorldPayloadReader.Parse(
+            manifest.LogicalName ?? string.Empty,
+            text,
+            manifest.PayloadPath);
+        if (parsed is null ||
+            !parsed.DisplayName.Equals(manifest.DisplayName, StringComparison.Ordinal) ||
+            parsed.WorldSeed != manifest.WorldSeed ||
+            !PlayersEquivalent(parsed.Players, manifest.Players ?? []))
+        {
+            throw new InvalidOperationException("Le contenu sémantique du monde ne correspond pas au manifeste.");
         }
 
         var players = (manifest.Players ?? [])
@@ -91,9 +113,20 @@ public static class ArtifactEnvelopeValidator
 
     private static bool IsSha256(string value) => value.Length == 64 && value.All(Uri.IsHexDigit);
 
+    private static bool PlayersEquivalent(
+        IReadOnlyList<GameSaveHub.Contracts.DiscoveredPlayer> parsed,
+        IReadOnlyList<ArtifactManifestPlayerEnvelope> manifest) =>
+        parsed
+            .OrderBy(player => player.Id)
+            .Select(player => (player.Id, player.Name, player.IsHost, player.InventoryId, player.EquipmentId))
+            .SequenceEqual(manifest
+                .OrderBy(player => player.Id)
+                .Select(player => (player.Id, player.Name ?? string.Empty, player.IsHost, player.InventoryId, player.EquipmentId)));
+
     private sealed record ArtifactManifestEnvelope(
         int SchemaVersion,
         string AdapterId,
+        string? LogicalName,
         string PayloadPath,
         long PayloadLength,
         string PayloadSha256,

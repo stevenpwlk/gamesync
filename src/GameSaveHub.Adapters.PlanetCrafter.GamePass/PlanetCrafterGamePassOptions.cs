@@ -7,4 +7,5 @@ public sealed record PlanetCrafterGamePassOptions
     public string? LocalApplicationDataOverride { get; init; }
     public Func<IReadOnlyList<(int Id, string Name)>>? ProcessProbe { get; init; }
     public Func<bool>? ActiveNetworkRouteProbe { get; init; }
+    public Func<string, string>? FinalPathResolver { get; init; }
 }

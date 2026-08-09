@@ -64,7 +64,7 @@ function Test-Phase3Guards {
     }
     $cases = $facts + $inline
     # Plancher de non-regression : le nombre de cas peut augmenter, jamais diminuer.
-    $minimumCases = 70
+    $minimumCases = 120
     if ($cases -lt $minimumCases) {
         throw "Regression de couverture : $cases cas pour un plancher de $minimumCases."
     }
@@ -158,10 +158,10 @@ function Test-Phase3Guards {
 
     $migrations = Get-ChildItem -LiteralPath (Join-Path $repo 'src\GameSaveHub.Server.Infrastructure\Migrations') -Filter '*.cs' -File |
         Where-Object { $_.Name -notmatch '\.Designer\.cs$' -and $_.Name -ne 'GameSaveHubDbContextModelSnapshot.cs' }
-    if ($migrations.Count -ne 4) {
-        throw "Nombre de migrations EF inattendu : $($migrations.Count) (4 attendu, aucune migration Phase 3)."
+    if ($migrations.Count -ne 5) {
+        throw "Nombre de migrations EF inattendu : $($migrations.Count) (5 attendu)."
     }
-    Write-Host 'Base SQLite : aucune nouvelle migration Phase 3'
+    Write-Host 'Base SQLite : migration PublishedByPlayerName presente'
 
     foreach ($bad in @('DangerousAcceptAnyServerCertificateValidator', 'ServerCertificateCustomValidationCallback')) {
         if ($httpClient -match $bad) { throw "Bypass TLS interdit detecte : $bad" }
@@ -355,7 +355,7 @@ Write-Host "Taille            : $apiTarBytes octets"
 Write-Host "SHA-256           : $apiHash"
 
 Write-Host "`nVALIDATION PHASE 3 TERMINEE" -ForegroundColor Green
-Write-Host 'Attendu : 0 echec, au moins 70 cas de test executes.'
+Write-Host 'Attendu : 0 echec, au moins 120 cas de test executes.'
 Write-Host 'Attendu : canPrepareForHost=true, canImportPortableArtifact=true, canLaunchGame=false.'
 Write-Host 'IMPORTANT : FeatureGates__AllowHostTransfer=false ET EnableWgsTransfer=false.'
 Write-Host 'Ce build ne contacte pas le NAS et n ecrit pas dans WGS.'

@@ -25,6 +25,8 @@
     <ProjectReference Include="..\..\src\GameSaveHub.Adapters.Abstractions\GameSaveHub.Adapters.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\GameSaveHub.Adapters.PlanetCrafter.GamePass\GameSaveHub.Adapters.PlanetCrafter.GamePass.csproj" />
     <ProjectReference Include="..\..\src\GameSaveHub.Server.Infrastructure\GameSaveHub.Server.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\GameSaveHub.SaveExporter.Core\GameSaveHub.SaveExporter.Core.csproj" />
+    <ProjectReference Include="..\..\src\GameSaveHub.Server.Admin\GameSaveHub.Server.Admin.csproj" />
   </ItemGroup>
 
 </Project>

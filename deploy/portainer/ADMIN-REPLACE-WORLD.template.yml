@@ -1,0 +1,38 @@
+name: gamesavehub-admin-replace-world-temp
+
+services:
+  admin:
+    image: ${GSH_ADMIN_IMAGE:-gamesavehub-admin:0.4.0}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -- world replace "$$GSH_WORLD_ID" "/imports/$$GSH_IMPORT_FILE" "$$GSH_EXPECTED_VERSION_ID" --source-player "$$GSH_SOURCE_PLAYER"
+        for player in "$$GSH_REQUIRED_PLAYER_1" "$$GSH_REQUIRED_PLAYER_2" "$$GSH_REQUIRED_PLAYER_3"; do
+          if [ -n "$$player" ]; then set -- "$$@" --require-player "$$player"; fi
+        done
+        set -- "$$@" --reason "$$GSH_REASON"
+        exec dotnet GameSaveHub.Server.Admin.dll "$$@"
+    environment:
+      GSH_CONNECTION_STRING: Data Source=/data/gamesavehub.db;Cache=Shared;Pooling=True
+      GSH_STORAGE_ROOT: /data
+      GSH_MAX_ARTIFACT_BYTES: 67108864
+      GSH_WORLD_ID: ${GSH_WORLD_ID:?world id required}
+      GSH_IMPORT_FILE: ${GSH_IMPORT_FILE:?gshsave filename required}
+      GSH_EXPECTED_VERSION_ID: ${GSH_EXPECTED_VERSION_ID:?current version id required}
+      GSH_SOURCE_PLAYER: ${GSH_SOURCE_PLAYER:?source player required}
+      GSH_REQUIRED_PLAYER_1: ${GSH_REQUIRED_PLAYER_1:?first required player required}
+      GSH_REQUIRED_PLAYER_2: ${GSH_REQUIRED_PLAYER_2:-}
+      GSH_REQUIRED_PLAYER_3: ${GSH_REQUIRED_PLAYER_3:-}
+      GSH_REASON: ${GSH_REASON:?reason required}
+    volumes:
+      - ${GSH_DATA_PATH:-/Volume2/gamesavehub/data}:/data
+      - ${GSH_IMPORT_PATH:-/Volume2/gamesavehub/imports}:/imports:ro
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  backend:
+    external: true
+    name: ${GSH_BACKEND_NETWORK:-gamesavehub_backend}

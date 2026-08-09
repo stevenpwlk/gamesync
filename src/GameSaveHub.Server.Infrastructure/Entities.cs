@@ -64,6 +64,7 @@ public sealed class SaveVersionEntity
     public DateTimeOffset CreatedAtUtc { get; set; }
     public bool IsProtected { get; set; }
     public string? ProtectionReason { get; set; }
+    public string? PublishedByPlayerName { get; set; }
 }
 
 public sealed class AdminAuditEntity

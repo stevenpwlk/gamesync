@@ -10,5 +10,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <ProjectReference Include="..\GameSaveHub.Core\GameSaveHub.Core.csproj" />
+    <ProjectReference Include="..\GameSaveHub.Contracts\GameSaveHub.Contracts.csproj" />
+    <ProjectReference Include="..\GameSaveHub.Adapters.PlanetCrafter.GamePass\GameSaveHub.Adapters.PlanetCrafter.GamePass.csproj" />
   </ItemGroup>
 </Project>

@@ -136,6 +136,96 @@ public sealed class ImmutableArtifactStore(IOptions<StorageOptions> options)
         return destination;
     }
 
+    public async Task<ImportedArtifactObject> ImportLocalAsync(
+        string sourcePath,
+        CancellationToken cancellationToken = default)
+    {
+        await using var staged = await StageLocalAsync(sourcePath, cancellationToken);
+        return await PublishStagedAsync(staged, cancellationToken);
+    }
+
+    public async Task<StagedLocalArtifact> StageLocalAsync(
+        string sourcePath,
+        CancellationToken cancellationToken = default)
+    {
+        var source = Path.GetFullPath(sourcePath);
+        var sourceInfo = new FileInfo(source);
+        if (!sourceInfo.Exists || sourceInfo.Length <= 0 || sourceInfo.Length > _options.MaxArtifactBytes)
+            throw new InvalidOperationException("Taille d'artefact local invalide.");
+
+        var stagingDirectory = Path.Combine(GetRoot(), "pending", "local-imports");
+        Directory.CreateDirectory(stagingDirectory);
+        var stagedPath = Path.Combine(stagingDirectory, Guid.NewGuid().ToString("N") + ".gshsave");
+        try
+        {
+            await using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 131072, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            await using (var output = new FileStream(stagedPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 131072, FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await input.CopyToAsync(output, cancellationToken);
+                await output.FlushAsync(cancellationToken);
+                output.Flush(true);
+            }
+
+            var stagedInfo = new FileInfo(stagedPath);
+            if (stagedInfo.Length != sourceInfo.Length || stagedInfo.Length <= 0 || stagedInfo.Length > _options.MaxArtifactBytes)
+                throw new InvalidOperationException("Le monde a changé pendant la copie locale.");
+
+            var summary = await ArtifactEnvelopeValidator.ReadSummaryAsync(
+                stagedPath,
+                _options.MaxArtifactBytes,
+                cancellationToken);
+            var hash = await FileSafety.ComputeSha256Async(stagedPath, cancellationToken);
+            return new StagedLocalArtifact(stagedPath, hash, stagedInfo.Length, summary);
+        }
+        catch
+        {
+            if (File.Exists(stagedPath)) File.Delete(stagedPath);
+            throw;
+        }
+    }
+
+    public async Task<ImportedArtifactObject> PublishStagedAsync(
+        StagedLocalArtifact staged,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(staged);
+        var stagedInfo = new FileInfo(staged.Path);
+        if (!stagedInfo.Exists || stagedInfo.Length != staged.Length)
+            throw new InvalidOperationException("Le snapshot validé est absent ou a changé.");
+        var stagedHash = await FileSafety.ComputeSha256Async(staged.Path, cancellationToken);
+        if (!stagedHash.Equals(staged.Sha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Le snapshot validé a changé avant sa publication.");
+
+        var destination = GetObjectPath(staged.Sha256);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+
+        if (File.Exists(destination))
+        {
+            var existingInfo = new FileInfo(destination);
+            var existingHash = await FileSafety.ComputeSha256Async(destination, cancellationToken);
+            if (existingInfo.Length != staged.Length ||
+                !existingHash.Equals(staged.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Collision ou objet immuable existant corrompu.");
+
+            return new ImportedArtifactObject(destination, staged.Sha256, existingInfo.Length, staged.Summary);
+        }
+
+        try
+        {
+            File.Move(staged.Path, destination);
+        }
+        catch (IOException) when (File.Exists(destination))
+        {
+            var concurrentInfo = new FileInfo(destination);
+            var concurrentHash = await FileSafety.ComputeSha256Async(destination, cancellationToken);
+            if (concurrentInfo.Length != staged.Length ||
+                !concurrentHash.Equals(staged.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Collision ou objet immuable concurrent corrompu.");
+        }
+
+        return new ImportedArtifactObject(destination, staged.Sha256, staged.Length, staged.Summary);
+    }
+
     /// <summary>
     /// Supprime les chunks d'un upload une fois la publication définitivement acquise.
     /// </summary>
@@ -160,4 +250,28 @@ public sealed class ImmutableArtifactStore(IOptions<StorageOptions> options)
     }
 
     private string GetRoot() => Path.GetFullPath(_options.Root);
+}
+
+public sealed record ImportedArtifactObject(
+    string Path,
+    string Sha256,
+    long Length,
+    ArtifactEnvelopeSummary Summary);
+
+public sealed class StagedLocalArtifact(
+    string path,
+    string sha256,
+    long length,
+    ArtifactEnvelopeSummary summary) : IAsyncDisposable
+{
+    public string Path { get; } = path;
+    public string Sha256 { get; } = sha256;
+    public long Length { get; } = length;
+    public ArtifactEnvelopeSummary Summary { get; } = summary;
+
+    public ValueTask DisposeAsync()
+    {
+        if (File.Exists(Path)) File.Delete(Path);
+        return ValueTask.CompletedTask;
+    }
 }

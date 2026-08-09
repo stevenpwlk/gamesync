@@ -13,6 +13,8 @@
     <Project Path="src/GameSaveHub.Server.Admin/GameSaveHub.Server.Admin.csproj" />
     <Project Path="src/GameSaveHub.Server.Api/GameSaveHub.Server.Api.csproj" />
     <Project Path="src/GameSaveHub.Server.Infrastructure/GameSaveHub.Server.Infrastructure.csproj" />
+    <Project Path="src/GameSaveHub.SaveExporter.Core/GameSaveHub.SaveExporter.Core.csproj" />
+    <Project Path="src/GameSaveHub.SaveExporter/GameSaveHub.SaveExporter.csproj" />
   </Folder>
   <Folder Name="/tests/" />
   <Folder Name="/tests/EndToEnd/">

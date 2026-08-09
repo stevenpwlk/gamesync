@@ -362,7 +362,15 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         var detection = await DetectInstallationAsync(cancellationToken);
         if (detection.WgsRoot is null) throw new InvalidOperationException("Stockage WGS introuvable.");
         var fullOutputRoot = Path.GetFullPath(outputRoot);
-        if (FileSafety.IsSameOrDescendant(fullOutputRoot, detection.WgsRoot) || FileSafety.IsSameOrDescendant(detection.WgsRoot, fullOutputRoot))
+        var finalPathResolver = _options.FinalPathResolver ?? FileSafety.ResolveDirectoryLinks;
+        var resolvedOutputRoot = finalPathResolver(fullOutputRoot);
+        var resolvedWgsRoot = finalPathResolver(detection.WgsRoot);
+        if (FileSafety.IsNetworkPath(resolvedOutputRoot))
+            throw new InvalidOperationException("Le dossier d'export doit se trouver sur un disque local.");
+        if (FileSafety.IsSameOrDescendant(fullOutputRoot, detection.WgsRoot) ||
+            FileSafety.IsSameOrDescendant(detection.WgsRoot, fullOutputRoot) ||
+            FileSafety.IsSameOrDescendant(resolvedOutputRoot, resolvedWgsRoot) ||
+            FileSafety.IsSameOrDescendant(resolvedWgsRoot, resolvedOutputRoot))
         {
             throw new InvalidOperationException("Le dossier d'export doit être séparé du stockage WGS.");
         }
@@ -492,7 +500,7 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 await using var semanticPayload = payloadEntry.Open();
                 using var reader = new StreamReader(semanticPayload, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: false);
                 var text = await reader.ReadToEndAsync(cancellationToken);
-                var parsed = ParseWorldMetadata(manifest.LogicalName, text, manifest.PayloadPath);
+                var parsed = PlanetCrafterWorldPayloadReader.Parse(manifest.LogicalName, text, manifest.PayloadPath);
                 if (parsed is null ||
                     !parsed.DisplayName.Equals(manifest.DisplayName, StringComparison.Ordinal) ||
                     parsed.WorldSeed != manifest.WorldSeed ||
@@ -1208,74 +1216,10 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         var info = new FileInfo(blobPath);
         if (info.Length > 256L * 1024 * 1024) return null;
         var text = await File.ReadAllTextAsync(blobPath, cancellationToken);
-        return ParseWorldMetadata(logicalName, text, FileSafety.GetSafeRelativePath(wgsRoot, blobPath));
-    }
-
-    private static DiscoveredWorld? ParseWorldMetadata(string logicalName, string text, string blobRelativePath)
-    {
-        var sections = text.Split("\r@\r", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var players = new List<DiscoveredPlayer>();
-        string? displayName = null;
-        string? planetId = null;
-        string? mode = null;
-        long? worldSeed = null;
-        foreach (var section in sections)
-        {
-            foreach (var record in section.Split(["|\r\n", "|\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                TryReadPlayer(record, players);
-            }
-            try
-            {
-                using var document = JsonDocument.Parse(section);
-                var root = document.RootElement;
-                if (!root.TryGetProperty("saveDisplayName", out var displayProperty)) continue;
-                displayName = displayProperty.GetString() ?? logicalName;
-                planetId = ReadString(root, "planetId");
-                mode = ReadString(root, "mode");
-                worldSeed = root.TryGetProperty("worldSeed", out var seed) && seed.TryGetInt64(out var value) ? value : null;
-            }
-            catch (JsonException)
-            {
-                // Some save sections contain pipe-separated JSON records; only the metadata section is needed here.
-            }
-        }
-        return displayName is null
-            ? null
-            : new DiscoveredWorld(
-                logicalName,
-                displayName,
-                planetId,
-                mode,
-                worldSeed,
-                blobRelativePath,
-                players.GroupBy(player => player.Id).Select(group => group.First()).OrderBy(player => player.Id).ToArray());
-    }
-
-    private static void TryReadPlayer(string record, List<DiscoveredPlayer> players)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(record);
-            var root = document.RootElement;
-            if (!root.TryGetProperty("id", out var id) ||
-                !root.TryGetProperty("name", out var name) ||
-                !root.TryGetProperty("host", out var host) ||
-                !root.TryGetProperty("inventoryId", out var inventoryId) ||
-                !root.TryGetProperty("equipmentId", out var equipmentId)) return;
-            players.Add(new DiscoveredPlayer(
-                id.GetInt32(),
-                name.GetString() ?? string.Empty,
-                host.GetBoolean(),
-                ReadString(root, "planetId"),
-                ReadString(root, "playerPosition"),
-                inventoryId.GetInt32(),
-                equipmentId.GetInt32()));
-        }
-        catch (JsonException)
-        {
-            // Not a player record.
-        }
+        return PlanetCrafterWorldPayloadReader.Parse(
+            logicalName,
+            text,
+            FileSafety.GetSafeRelativePath(wgsRoot, blobPath));
     }
 
     private static string ReadNullTerminatedUnicode(ReadOnlySpan<byte> bytes)
@@ -1294,9 +1238,6 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         var stableName = new Guid(metadata.AsSpan(entryOffset + 128, 16)).ToString("N").ToUpperInvariant();
         return Path.Combine(directory, stableName);
     }
-
-    private static string? ReadString(JsonElement root, string propertyName) =>
-        root.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private static bool PlayersEquivalent(IReadOnlyList<DiscoveredPlayer> left, IReadOnlyList<DiscoveredPlayer> right) =>
         left.OrderBy(player => player.Id).SequenceEqual(right.OrderBy(player => player.Id));

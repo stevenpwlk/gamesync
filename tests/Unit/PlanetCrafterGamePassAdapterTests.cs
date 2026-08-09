@@ -148,6 +148,96 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
     }
 
     [Fact]
+    public async Task PortableExportRefusesWhileGameIsRunning()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-2.json", "Shlags1");
+        var output = Path.Combine(_root, "artifacts");
+        var adapter = CreateAdapter(() => [(42, "Planet Crafter")]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            adapter.ExportPortableArtifactByLogicalNameAsync("Standard-2.json", output));
+
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
+    public async Task PortableExportRefusesDestinationInsideWgs()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-2.json", "Shlags1");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateAdapter().ExportPortableArtifactByLogicalNameAsync(
+                "Standard-2.json",
+                Path.Combine(wgs, "exports")));
+
+        Assert.False(Directory.Exists(Path.Combine(wgs, "exports")));
+    }
+
+    [Fact]
+    public async Task PortableExportRefusesDestinationLinkingIntoWgs()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-2.json", "Shlags1");
+        var linkedOutput = Path.Combine(_root, "linked-export");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateAdapter(finalPathResolver: path =>
+                    path.Equals(linkedOutput, StringComparison.OrdinalIgnoreCase) ? wgs : path)
+                .ExportPortableArtifactByLogicalNameAsync("Standard-2.json", linkedOutput));
+    }
+
+    [Fact]
+    public async Task PortableExportRefusesLocalLinkResolvingToNetworkShare()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-2.json", "Shlags1");
+        var linkedOutput = Path.Combine(_root, "linked-network-export");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateAdapter(finalPathResolver: path =>
+                    path.Equals(linkedOutput, StringComparison.OrdinalIgnoreCase) ? @"\\server\share" : path)
+                .ExportPortableArtifactByLogicalNameAsync("Standard-2.json", linkedOutput));
+
+        Assert.False(Directory.Exists(linkedOutput));
+    }
+
+    [Fact]
+    public async Task PortableExportRemovesPartialFileWhenGameStartsDuringCopy()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-2.json", "Shlags1");
+        var calls = 0;
+        var output = Path.Combine(_root, "artifacts");
+        var adapter = CreateAdapter(() => ++calls >= 3 ? [(42, "Planet Crafter")] : []);
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            adapter.ExportPortableArtifactByLogicalNameAsync("Standard-2.json", output));
+
+        Assert.Empty(Directory.EnumerateFiles(output));
+    }
+
+    [Fact]
+    public async Task PortableExportRemovesPartialFileWhenWorldChangesDuringCopy()
+    {
+        var wgs = CreateWgs();
+        var blob = CreateWorldFixture(wgs, "Standard-2.json", "Shlags1");
+        var calls = 0;
+        var output = Path.Combine(_root, "artifacts");
+        var adapter = CreateAdapter(() =>
+        {
+            if (++calls == 3) File.AppendAllText(blob, "mutation");
+            return [];
+        });
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            adapter.ExportPortableArtifactByLogicalNameAsync("Standard-2.json", output));
+
+        Assert.Empty(Directory.EnumerateFiles(output));
+    }
+
+    [Fact]
     public async Task PortableExportContainsOnlyManifestAndWorldPayload()
     {
         var wgs = CreateWgs();
@@ -523,12 +613,14 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
 
     private PlanetCrafterGamePassAdapter CreateAdapter(
         Func<IReadOnlyList<(int Id, string Name)>>? processProbe = null,
-        bool activeNetworkRoute = false) =>
+        bool activeNetworkRoute = false,
+        Func<string, string>? finalPathResolver = null) =>
         new(new PlanetCrafterGamePassOptions
         {
             LocalApplicationDataOverride = _root,
             ProcessProbe = processProbe ?? (() => []),
-            ActiveNetworkRouteProbe = () => activeNetworkRoute
+            ActiveNetworkRouteProbe = () => activeNetworkRoute,
+            FinalPathResolver = finalPathResolver
         });
 
     private string CreateWgs()

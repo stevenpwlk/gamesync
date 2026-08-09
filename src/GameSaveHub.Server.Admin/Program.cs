@@ -3,7 +3,9 @@ using System.Text;
 using System.Text.Json;
 using GameSaveHub.Core;
 using GameSaveHub.Server.Infrastructure;
+using GameSaveHub.Server.Admin;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 var connectionString = Environment.GetEnvironmentVariable("GSH_CONNECTION_STRING")
     ?? "Data Source=data/gamesavehub.db;Cache=Shared;Pooling=True";
@@ -72,6 +74,18 @@ switch ($"{args[0].ToLowerInvariant()} {args[1].ToLowerInvariant()}")
             Console.WriteLine($"{listedWorld.Id:D}\t{listedWorld.Name}\t{listedWorld.CurrentVersionId?.ToString("D") ?? "aucune version"}");
         return 0;
 
+    case "world replace":
+        var replacementRequest = WorldReplaceCommandParser.Parse(args);
+        var replacementStore = new ImmutableArtifactStore(Options.Create(new StorageOptions
+        {
+            Root = ReadStorageRoot(),
+            MaxArtifactBytes = ReadMaximumArtifactBytes()
+        }));
+        var replacementService = new WorldReplacementService(db, replacementStore, TimeProvider.System);
+        var replacement = await replacementService.ReplaceAsync(replacementRequest);
+        Console.WriteLine($"{replacement.NewVersionId:D}\t{replacement.Sha256}\t{replacement.Length}\t{(replacement.ReusedVersion ? "réutilisée" : "créée")}");
+        return 0;
+
     case "world import":
         RequireArgCount(args, 4);
         var importWorldId = Guid.Parse(args[2]);
@@ -108,19 +122,14 @@ switch ($"{args[0].ToLowerInvariant()} {args[1].ToLowerInvariant()}")
         var restoreWorldId = Guid.Parse(args[2]);
         var restoreVersionId = Guid.Parse(args[3]);
         var restoreReason = string.Join(' ', args.Skip(4)).Trim();
-        if (restoreReason.Length < 8) throw new InvalidOperationException("Une justification d'au moins 8 caractères est requise.");
-        var restoreWorld = await db.Worlds.FindAsync(restoreWorldId) ?? throw new InvalidOperationException("Monde introuvable.");
-        var restoreVersion = await db.SaveVersions.SingleOrDefaultAsync(x => x.Id == restoreVersionId && x.WorldId == restoreWorldId)
-            ?? throw new InvalidOperationException("Version introuvable pour ce monde.");
-        if (await db.Sessions.AnyAsync(x => x.WorldId == restoreWorldId && x.ReleasedAtUtc == null)) throw new InvalidOperationException("Monde verrouillé.");
-        var restoreObjectPath = Path.Combine(ReadStorageRoot(), "objects", restoreVersion.Sha256[..2], restoreVersion.Sha256[2..4], restoreVersion.Sha256 + ".gshsave");
-        if (!File.Exists(restoreObjectPath) || await FileSafety.ComputeSha256Async(restoreObjectPath) != restoreVersion.Sha256)
-            throw new InvalidOperationException("Objet immuable absent ou corrompu.");
-        var previousVersion = restoreWorld.CurrentVersionId;
-        restoreWorld.CurrentVersionId = restoreVersion.Id;
-        Audit(db, "world.restore", restoreWorld.Id.ToString("D"), restoreReason, new { previousVersion, restoredVersion = restoreVersion.Id });
-        await db.SaveChangesAsync();
-        Console.WriteLine($"Monde {restoreWorld.Id:D} restauré vers {restoreVersion.Id:D}.");
+        var restoreStore = new ImmutableArtifactStore(Options.Create(new StorageOptions
+        {
+            Root = ReadStorageRoot(),
+            MaxArtifactBytes = ReadMaximumArtifactBytes()
+        }));
+        var restoreService = new WorldReplacementService(db, restoreStore, TimeProvider.System);
+        await restoreService.RestoreAsync(new WorldRestoreRequest(restoreWorldId, restoreVersionId, restoreReason));
+        Console.WriteLine($"Monde {restoreWorldId:D} restauré vers {restoreVersionId:D}.");
         return 0;
 
     case "version list":
@@ -224,6 +233,7 @@ static void Usage()
           enrollment create [durée-minutes]
           device list|revoke <device-id>
           world create <nom>|list|import <world-id> <fichier.gshsave>|restore <world-id> <version-id> <justification>
+          world replace <world-id> <fichier.gshsave> <version-courante-attendue> --source-player <pseudo> [--require-player <pseudo>] --reason <justification>
           version list <world-id>|protect <version-id> <justification>
           retention plan|purge <world-id>
           session list|release <session-id> <justification>
