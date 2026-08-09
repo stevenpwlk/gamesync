@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace GameSaveHub.Client.Orchestration;
 
 /// <summary>
@@ -33,7 +35,8 @@ public sealed record WizardView(
     bool IsWaitingOnService,
     WizardTone Tone,
     int StepNumber = 0,
-    int StepCount = TransferWizardPresenter.NominalStepCount);
+    int StepCount = TransferWizardPresenter.NominalStepCount,
+    string? LastOutcome = null);
 
 /// <summary>
 /// Traduit l'état d'une session de transfert en instructions pour un joueur.
@@ -67,11 +70,15 @@ public static class TransferWizardPresenter
     public static WizardView Describe(
         TransferSession? session,
         bool preflightCompatible,
-        bool wgsTransferEnabled)
+        bool wgsTransferEnabled,
+        TransferSession? lastFinished = null)
     {
         if (session is null)
         {
-            return DescribeIdle(preflightCompatible, wgsTransferEnabled);
+            return DescribeIdle(preflightCompatible, wgsTransferEnabled) with
+            {
+                LastOutcome = DescribeLastOutcome(lastFinished)
+            };
         }
 
         var canAbort = TransferStageRules.CanAbortBeforeImport(session);
@@ -244,20 +251,49 @@ public static class TransferWizardPresenter
         };
     }
 
+    /// <summary>
+    /// Résumé du dernier transfert achevé, à afficher quand aucun n'est en cours.
+    /// </summary>
+    /// <remarks>
+    /// Sans cela, une session terminée automatiquement au redémarrage du service est
+    /// invisible : l'écran affiche « prêt à démarrer » exactement comme si rien ne
+    /// s'était passé. Un joueur qui vient de jouer en conclut que son transfert a
+    /// échoué et recommence tout — c'est précisément le va-et-vient qu'on cherche à
+    /// éviter quand le PC distant ne peut être sollicité qu'une fois.
+    /// </remarks>
+    public static string? DescribeLastOutcome(TransferSession? session)
+    {
+        if (session is null) return null;
+        var moment = session.UpdatedAtUtc.ToLocalTime().ToString("dd/MM 'à' HH:mm", CultureInfo.InvariantCulture);
+        return session.Stage switch
+        {
+            TransferStage.Completed => session.ResultVersionId is Guid version
+                ? $"Dernier transfert : terminé le {moment}. Sauvegarde publiée sur le NAS (version {version:D})."
+                : $"Dernier transfert : terminé le {moment}. Sauvegarde publiée sur le NAS.",
+            TransferStage.Aborted => $"Dernier transfert : abandonné le {moment}, avant toute écriture.",
+            TransferStage.Failed => FormatError(session) is string reason
+                ? $"Dernier transfert : échoué le {moment} — {reason}"
+                : $"Dernier transfert : échoué le {moment}.",
+            _ => null
+        };
+    }
+
     private static WizardView DescribeIdle(bool preflightCompatible, bool wgsTransferEnabled)
     {
         if (!wgsTransferEnabled)
         {
             return new WizardView(
-                "Aucun transfert en cours",
-                "L'écriture des sauvegardes est désactivée sur ce PC. C'est volontaire : le transfert d'hôte reste fermé tant que la validation n'est pas terminée.",
+                "Écriture désactivée sur ce PC",
+                "GameSave Hub peut consulter le NAS et vérifier la compatibilité, mais il ne peut rien écrire dans vos parties. " +
+                "Pour autoriser l'écriture, fermez cette fenêtre et lancez INSTALLER-GAMESAVEHUB-PILOTE.cmd depuis le package pilote, " +
+                "puis rouvrez GameSave Hub.",
                 NoSteps,
                 null,
                 null,
                 null,
                 false,
                 false,
-                WizardTone.Neutral);
+                WizardTone.Warning);
         }
 
         return preflightCompatible

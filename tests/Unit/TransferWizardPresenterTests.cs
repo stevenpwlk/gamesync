@@ -21,6 +21,67 @@ public sealed class TransferWizardPresenterTests
         Assert.False(view.ShowAbort);
     }
 
+    /// <summary>
+    /// Constater qu'on est bloqué ne suffit pas : l'écran doit dire quoi faire.
+    /// Sans cela le joueur reste devant un refus qu'il ne peut pas lever seul.
+    /// </summary>
+    [Fact]
+    public void ClosedLocalGateNamesTheInstallerThatOpensIt()
+    {
+        var view = TransferWizardPresenter.Describe(null, preflightCompatible: true, wgsTransferEnabled: false);
+
+        Assert.Contains("INSTALLER-GAMESAVEHUB-PILOTE.cmd", view.Instruction, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CompletedTransferRemainsVisibleOnceTheSessionIsNoLongerActive()
+    {
+        var finished = SessionAt(TransferStage.Completed) with
+        {
+            ResultVersionId = Guid.Parse("fe32692b-c894-4a3f-baa1-add5c9bab87b")
+        };
+
+        var view = TransferWizardPresenter.Describe(null, preflightCompatible: true, wgsTransferEnabled: true, finished);
+
+        Assert.NotNull(view.LastOutcome);
+        Assert.Contains("fe32692b", view.LastOutcome!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FailedTransferSurfacesItsReasonInTheLastOutcome()
+    {
+        var finished = SessionAt(TransferStage.Failed) with
+        {
+            LastErrorCode = "capture_failed",
+            LastErrorMessage = "Plusieurs mondes portent ce nom."
+        };
+
+        var outcome = TransferWizardPresenter.DescribeLastOutcome(finished);
+
+        Assert.Contains("capture_failed", outcome!, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Une session encore en cours n'est pas un résultat : l'afficher comme tel
+    /// laisserait croire que le transfert est fini alors qu'il tourne encore.
+    /// </summary>
+    [Theory]
+    [InlineData(TransferStage.Importing)]
+    [InlineData(TransferStage.Interrupted)]
+    [InlineData(TransferStage.InGame)]
+    public void NonTerminalSessionsProduceNoLastOutcome(TransferStage stage)
+    {
+        Assert.Null(TransferWizardPresenter.DescribeLastOutcome(SessionAt(stage)));
+    }
+
+    [Fact]
+    public void NoPreviousTransferProducesNoLastOutcome()
+    {
+        var view = TransferWizardPresenter.Describe(null, preflightCompatible: true, wgsTransferEnabled: true);
+
+        Assert.Null(view.LastOutcome);
+    }
+
     [Fact]
     public void IdleWithoutPreflightOffersNoAction()
     {

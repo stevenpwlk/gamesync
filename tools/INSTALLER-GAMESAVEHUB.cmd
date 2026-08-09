@@ -71,5 +71,9 @@ echo.
 
 start "" "C:\Program Files\GameSaveHub\Client\App\GameSaveHub.Client.App.exe"
 
-timeout /t 6 >nul
+rem La fenetre ne se referme pas seule : les dernieres lignes indiquent si ce PC
+rem peut ecrire dans les sauvegardes, et cet etat doit avoir ete lu avant qu on
+rem entame un transfert.
+echo.
+pause
 exit /b 0

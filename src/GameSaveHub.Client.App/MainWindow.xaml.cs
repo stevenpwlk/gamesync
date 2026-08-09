@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private bool _needsManualReview;
     private string? _registeredPlayerName;
     private TransferSession? _activeSession;
+    private TransferSession? _lastFinishedSession;
     private WizardView _wizard = TransferWizardPresenter.Describe(null, false, false);
     private int _busyDepth;
 
@@ -343,7 +344,8 @@ public partial class MainWindow : Window
         var result = await _pipeClient.SendAsync(new PipeRequest("transfer-active"));
 
         _needsManualReview = result.Code == "multiple_active_transfers";
-        _activeSession = ParseSession(result);
+        _activeSession = ParseSession(result, "session");
+        _lastFinishedSession = ParseSession(result, "lastFinished");
 
         if (_needsManualReview)
         {
@@ -359,10 +361,10 @@ public partial class MainWindow : Window
         if (shouldPoll) _sessionTimer.Start(); else _sessionTimer.Stop();
     }
 
-    private static TransferSession? ParseSession(PipeResponse response)
+    private static TransferSession? ParseSession(PipeResponse response, string property)
     {
         if (response.Data is not JsonElement data || data.ValueKind != JsonValueKind.Object) return null;
-        if (!data.TryGetProperty("session", out var session) || session.ValueKind != JsonValueKind.Object) return null;
+        if (!data.TryGetProperty(property, out var session) || session.ValueKind != JsonValueKind.Object) return null;
 
         try
         {
@@ -379,7 +381,7 @@ public partial class MainWindow : Window
 
     private void RenderWizard()
     {
-        _wizard = TransferWizardPresenter.Describe(_activeSession, _preflightCompatible, _wgsTransferEnabled);
+        _wizard = TransferWizardPresenter.Describe(_activeSession, _preflightCompatible, _wgsTransferEnabled, _lastFinishedSession);
 
         if (_needsManualReview)
         {
@@ -438,6 +440,11 @@ public partial class MainWindow : Window
         }
 
         WizardAbortButton.Visibility = _wizard.ShowAbort ? Visibility.Visible : Visibility.Collapsed;
+
+        LastOutcomeText.Text = _wizard.LastOutcome ?? string.Empty;
+        LastOutcomeCard.Visibility = string.IsNullOrWhiteSpace(_wizard.LastOutcome)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
 
         // Pendant une session, le catalogue n'a plus de sens : l'utilisateur ne doit pas
         // pouvoir en changer et croire que l'assistant a suivi.

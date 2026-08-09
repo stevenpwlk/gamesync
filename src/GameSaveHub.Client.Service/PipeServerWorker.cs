@@ -123,7 +123,7 @@ public sealed partial class PipeServerWorker(
                         await serverClient.GetWorldPreviewAsync(previewWorldId, cancellationToken)),
                 "preflight" when request.WorldId is Guid preflightWorldId =>
                     await RunPreflightAsync(preflightWorldId, cancellationToken),
-                "transfer-active" => ToPipe(await GetActiveTransferStatusAsync(cancellationToken)),
+                "transfer-active" => await GetTransferScreenAsync(cancellationToken),
                 "diagnostic-report" => await BuildDiagnosticReportAsync(cancellationToken),
                 "transfer-start" when request.WorldId is Guid worldId =>
                     await StartTransferAsync(worldId, request.PlayerName, cancellationToken),
@@ -344,6 +344,33 @@ public sealed partial class PipeServerWorker(
         {
             return [$"journal Windows illisible : {exception.Message}"];
         }
+    }
+
+    /// <summary>
+    /// Tout ce dont l'écran de transfert a besoin : la session active s'il y en a une,
+    /// et dans tous les cas le dernier transfert achevé.
+    /// </summary>
+    /// <remarks>
+    /// Le dernier résultat est renvoyé même lorsqu'aucune session n'est active, parce
+    /// qu'une session peut se terminer sans que le joueur soit devant l'écran : le
+    /// service reprend seul certaines étapes à son démarrage.
+    /// </remarks>
+    private async Task<PipeResponse> GetTransferScreenAsync(CancellationToken cancellationToken)
+    {
+        var result = await GetActiveTransferStatusAsync(cancellationToken);
+        var lastFinished = (await orchestrator.GetAllSessionsAsync(cancellationToken))
+            .Where(item => TransferStageRules.IsTerminal(item.Stage))
+            .OrderByDescending(item => item.UpdatedAtUtc)
+            .FirstOrDefault();
+
+        var session = result.Session;
+        return new PipeResponse(result.Success, result.Code, result.Message, new
+        {
+            Session = session,
+            Stage = session?.Stage.ToString(),
+            PlaceholderName = session?.PlaceholderName,
+            LastFinished = lastFinished
+        });
     }
 
     private async Task<TransferOperationResult> GetActiveTransferStatusAsync(CancellationToken cancellationToken)

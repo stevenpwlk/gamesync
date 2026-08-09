@@ -61,6 +61,21 @@ if ($null -ne $existing) {
     Start-Sleep -Seconds 2
 }
 
+# État du verrou d'écriture AVANT cette installation. Deux packages coexistent, aux
+# noms très proches : installer le standard par-dessus le pilote referme le verrou
+# sans que rien ne le signale, et le blocage n'apparaît qu'une fois le joueur engagé
+# dans un transfert. On le relève ici pour pouvoir l'annoncer explicitement.
+$configPath = Join-Path $serviceRoot "appsettings.local.json"
+$previousGate = $null
+if (Test-Path -LiteralPath $configPath) {
+    try {
+        $previousGate = [bool](Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json).ClientService.EnableWgsTransfer
+    }
+    catch {
+        $previousGate = $null
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $serviceRoot, $appRoot, $programDataRoot | Out-Null
 Copy-Item -Path (Join-Path $PSScriptRoot "Service\*") -Destination $serviceRoot -Force -Recurse
 Copy-Item -Path (Join-Path $PSScriptRoot "App\*") -Destination $appRoot -Force -Recurse
@@ -77,7 +92,6 @@ $config = @{
         EnableWgsTransfer = [bool]$EnableWgsTransfer
     }
 }
-$configPath = Join-Path $serviceRoot "appsettings.local.json"
 $config | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $configPath -Encoding UTF8
 
 $serviceExe = Join-Path $serviceRoot "GameSaveHub.Client.Service.exe"
@@ -119,4 +133,22 @@ if ($EnableWgsTransfer) {
 else {
     Write-Host "Écriture des sauvegardes : DÉSACTIVÉE (EnableWgsTransfer=false)" -ForegroundColor Green
     Write-Host "Ce PC peut enrôler, lire le catalogue et vérifier la compatibilité, sans rien écrire."
+}
+
+# Un changement d'état du verrou n'est jamais anodin : il décide si ce PC peut, ou
+# non, écrire dans les sauvegardes du joueur. Le refermer par inadvertance bloque
+# un transfert en cours de campagne, et le message ci-dessus passe inaperçu quand
+# on ne le cherche pas.
+if ($null -ne $previousGate -and $previousGate -ne [bool]$EnableWgsTransfer) {
+    Write-Host ""
+    if ($previousGate) {
+        Write-Host "ATTENTION : L'ÉCRITURE VIENT D'ÊTRE REFERMÉE SUR CE PC." -ForegroundColor Red
+        Write-Host "Elle était autorisée avant cette installation. Vous venez d'installer le"
+        Write-Host "package STANDARD par-dessus le package PILOTE."
+        Write-Host "Si vous vouliez la conserver, relancez INSTALLER-GAMESAVEHUB-PILOTE.cmd."
+    }
+    else {
+        Write-Host "L'écriture des sauvegardes vient d'être AUTORISÉE sur ce PC." -ForegroundColor Yellow
+        Write-Host "Elle était fermée avant cette installation."
+    }
 }
