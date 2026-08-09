@@ -102,6 +102,7 @@ Les quatre points listés dans la version précédente de ce document sont **ré
 
 | Sujet | Détail |
 |---|---|
+| `WorldSessionStateMachine` ne garde rien | `CanTransition` et `EnsureTransition` ne sont appelés **nulle part** en production ; seul `CanUserAbort` l'est. Les vraies préconditions sont écrites endpoint par endpoint dans `Program.cs`, et `HoldsWorldLock` est court-circuité par `ReleasedAtUtc == null`. Dix tests unitaires valident donc des règles qui ne gardent rien, et la lecture de la classe induit en erreur : elle interdit `Interrupted → InGame`, alors que `/import-starting` l'autorise explicitement (ligne 376) — c'est justement ce qui rend une reprise possible après un redémarrage. À trancher **après** la campagne : soit faire passer les endpoints par la machine d'états, soit la supprimer |
 | Installateur Windows non signé | Avertissement SmartScreen — connu et assumé depuis la conception |
 | Numérotation des phases | Deux systèmes concurrents (voir [04](04-ETAT-DU-DEPOT.md), anomalie 6) |
 | `deploy/compose.portainer.yml` | Le dépôt conserve `AllowHostTransfer: "false"` alors que la stack en service est ouverte : divergence volontaire, mais à refermer en fin de campagne |
