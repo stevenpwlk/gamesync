@@ -6,6 +6,7 @@ return await DiagnosticApplication.RunAsync(args);
 
 internal static class DiagnosticApplication
 {
+    private const string DefaultTargetDisplayName = "GSH-MONDE-PARTAGE";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     public static async Task<int> RunAsync(string[] args)
@@ -139,7 +140,7 @@ internal static class DiagnosticApplication
     {
         var artifactPath = ReadOption(args, "--artifact") ?? throw new ArgumentException("L'option --artifact est obligatoire.");
         var player = ReadOption(args, "--player") ?? throw new ArgumentException("L'option --player est obligatoire.");
-        var displayName = ReadOption(args, "--display-name") ?? throw new ArgumentException("L'option --display-name est obligatoire.");
+        var displayName = ResolvePrepareHostDisplayName(args);
         var output = ReadOption(args, "--output") ?? throw new ArgumentException("L'option --output est obligatoire.");
         EnsureOnlyOptions(args, "--artifact", "--player", "--display-name", "--output");
 
@@ -159,6 +160,9 @@ internal static class DiagnosticApplication
         Console.WriteLine($"SHA-256 : {result.PreparedArtifact.Sha256}");
         return 0;
     }
+
+    internal static string ResolvePrepareHostDisplayName(string[] args) =>
+        ReadOption(args, "--display-name") ?? DefaultTargetDisplayName;
 
     private static async Task<int> ImportBaselineAsync(PlanetCrafterGamePassAdapter adapter, string[] args)
     {

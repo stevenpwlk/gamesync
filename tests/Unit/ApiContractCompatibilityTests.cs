@@ -56,4 +56,19 @@ public sealed class ApiContractCompatibilityTests
         Assert.Equal(versionId, request!.ExpectedVersionId);
         Assert.Null(request.PlayerName);
     }
+
+    [Theory]
+    [InlineData(HostPreparationOutcome.Prepared, 0)]
+    [InlineData(HostPreparationOutcome.AlreadyHost, 1)]
+    [InlineData(HostPreparationOutcome.PlayerNotFound, 2)]
+    [InlineData(HostPreparationOutcome.PlayerAmbiguous, 3)]
+    [InlineData(HostPreparationOutcome.InvalidArtifact, 4)]
+    [InlineData(HostPreparationOutcome.InvalidPlayerTopology, 5)]
+    [InlineData(HostPreparationOutcome.Failed, 6)]
+    public void HostPreparationOutcomePreservesPublishedNumericValues(
+        HostPreparationOutcome outcome,
+        int expectedValue)
+    {
+        Assert.Equal(expectedValue, (int)outcome);
+    }
 }
