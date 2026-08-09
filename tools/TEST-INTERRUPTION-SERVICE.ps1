@@ -38,6 +38,22 @@ $root = Join-Path $env:ProgramData 'GameSaveHub'
 $trigger = Join-Path $root 'interrupt.trigger'
 $transcript = Join-Path $root ("interruption-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 
+# Les sessions sont stockées avec l'étape sous forme numérique. Un relevé de
+# preuve doit se lire sans avoir le code sous les yeux : on retraduit ici l'ordre
+# exact de l'énumération TransferStage.
+$stageNames = @(
+    'Initialized', 'Acquiring', 'DownloadingArtifact', 'PreparingArtifact',
+    'CreatingBaseline', 'AwaitingPlaceholder', 'Importing', 'ReadyToPlay',
+    'InGame', 'CapturingResult', 'UploadPending', 'Uploading', 'Publishing',
+    'Completed', 'Interrupted', 'Aborted', 'Failed', 'ManualReview'
+)
+
+function Get-StageName($value) {
+    if ($null -eq $value) { return '' }
+    if ($value -ge 0 -and $value -lt $stageNames.Count) { return "$($stageNames[$value]) ($value)" }
+    return "inconnue ($value)"
+}
+
 function Get-LocalSessions {
     $transfers = Join-Path $root 'transfers'
     if (-not (Test-Path -LiteralPath $transfers)) { return @() }
@@ -47,8 +63,11 @@ function Get-LocalSessions {
             $s = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
             [pscustomobject]@{
                 Session  = $s.localSessionId
-                Etape    = $s.stage
+                Etape    = Get-StageName $s.stage
+                Reprise  = Get-StageName $s.resumeStage
                 Revision = $s.revision
+                Erreur   = $s.lastErrorCode
+                Message  = $s.lastErrorMessage
                 Upload   = $s.uploadId
                 Chunks   = ($s.confirmedChunks -join ',')
                 Version  = $s.resultVersionId
