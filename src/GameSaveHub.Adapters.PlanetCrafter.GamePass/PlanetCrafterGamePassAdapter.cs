@@ -588,6 +588,567 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         }
     }
 
+    public async Task<ManagedSlotBaselineResult> CreateManagedSlotBaselineAsync(
+        ManagedSlotReference slot,
+        string outputRoot,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(slot.LogicalName) ||
+            string.IsNullOrWhiteSpace(slot.CurrentDisplayName) ||
+            string.IsNullOrWhiteSpace(slot.DesiredDisplayName))
+        {
+            return ManagedSlotBaselineFailed("La référence du slot permanent est incomplète.");
+        }
+        if (ProbeProcesses().Count > 0)
+        {
+            return ManagedSlotBaselineFailed("Fermez complètement The Planet Crafter avant de créer la baseline du slot permanent.");
+        }
+
+        var detection = await DetectInstallationAsync(cancellationToken);
+        if (detection.WgsRoot is null) return ManagedSlotBaselineFailed("Stockage WGS introuvable.");
+
+        var fullOutputRoot = Path.GetFullPath(outputRoot);
+        var finalPathResolver = _options.FinalPathResolver ?? Path.GetFullPath;
+        var resolvedOutputRoot = finalPathResolver(fullOutputRoot);
+        var resolvedWgsRoot = finalPathResolver(detection.WgsRoot);
+        if (FileSafety.IsSameOrDescendant(fullOutputRoot, detection.WgsRoot) ||
+            FileSafety.IsSameOrDescendant(detection.WgsRoot, fullOutputRoot) ||
+            FileSafety.IsSameOrDescendant(resolvedOutputRoot, resolvedWgsRoot) ||
+            FileSafety.IsSameOrDescendant(resolvedWgsRoot, resolvedOutputRoot))
+        {
+            return ManagedSlotBaselineFailed("Le dossier de baseline doit être totalement séparé du stockage WGS.");
+        }
+
+        var before = await InspectLocalStorageAsync(cancellationToken);
+        if (!before.Stable || before.GameRunning)
+        {
+            return ManagedSlotBaselineFailed("Le stockage WGS n'est pas stable ou le jeu est encore ouvert.");
+        }
+
+        var matchingTargets = before.Worlds
+            .Where(world => world.LogicalName.Equals(slot.LogicalName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (matchingTargets.Length != 1)
+        {
+            return ManagedSlotBaselineFailed(
+                matchingTargets.Length == 0
+                    ? $"Le slot logique déclaré '{slot.LogicalName}' est absent."
+                    : $"Le slot logique déclaré '{slot.LogicalName}' est ambigu.");
+        }
+
+        var target = matchingTargets[0];
+        if (!target.DisplayName.Equals(slot.CurrentDisplayName, StringComparison.Ordinal))
+        {
+            return ManagedSlotBaselineFailed(
+                $"Le nom affiché courant du slot '{slot.LogicalName}' ne correspond pas à la référence déclarée.");
+        }
+        var localPlayers = target.Players.Where(player => player.Id == 0).ToArray();
+        if (localPlayers.Length != 1 || !localPlayers[0].IsHost || target.Players.Count(player => player.IsHost) != 1)
+        {
+            return ManagedSlotBaselineFailed(
+                "Le slot permanent doit contenir un joueur local ID 0 qui soit l'unique hôte.");
+        }
+
+        Directory.CreateDirectory(fullOutputRoot);
+        var snapshotId = $"{DateTimeOffset.UtcNow:yyyyMMddTHHmmssZ}-{Guid.NewGuid():N}";
+        var temporary = Path.Combine(fullOutputRoot, $".{snapshotId}.partial");
+        var destination = Path.Combine(fullOutputRoot, snapshotId);
+        try
+        {
+            Directory.CreateDirectory(temporary);
+            foreach (var file in before.Files)
+            {
+                var source = ResolveContainedPath(detection.WgsRoot, file.RelativePath);
+                var copied = ResolveContainedPath(Path.Combine(temporary, "wgs"), file.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(copied)!);
+                File.Copy(source, copied, overwrite: false);
+                var copiedHash = await FileSafety.ComputeSha256Async(copied, cancellationToken);
+                if (!copiedHash.Equals(file.Sha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new IOException($"Hash différent après copie : {file.RelativePath}");
+                }
+            }
+
+            if (ProbeProcesses().Count > 0) throw new IOException("Le jeu a été lancé pendant la baseline du slot permanent.");
+            var after = await InspectLocalStorageAsync(cancellationToken);
+            if (!Equivalent(before.Files, after.Files)) throw new IOException("Le stockage WGS a changé pendant la baseline du slot permanent.");
+
+            var protectedWorlds = before.Worlds
+                .Where(world => !world.LogicalName.Equals(target.LogicalName, StringComparison.OrdinalIgnoreCase))
+                .Select(world => new ImportProtectedWorld(
+                    world.LogicalName,
+                    world.DisplayName,
+                    world.WorldSeed,
+                    GetWorldPayloadHash(before, world)))
+                .OrderBy(world => world.LogicalName, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var manifest = new ManagedSlotBaselineManifest(
+                1,
+                snapshotId,
+                AdapterId,
+                _options.PackageFamilyName,
+                DateTimeOffset.UtcNow,
+                new ManagedSlotBaselineTarget(
+                    target.LogicalName,
+                    target.DisplayName,
+                    slot.DesiredDisplayName,
+                    target.WorldSeed,
+                    GetWorldPayloadHash(before, target)),
+                protectedWorlds,
+                before.Files);
+            await File.WriteAllTextAsync(
+                Path.Combine(temporary, "managed-slot-baseline.json"),
+                JsonSerializer.Serialize(manifest, JsonOptions),
+                cancellationToken);
+            var validation = await ValidateManagedSlotBaselineSourceAsync(temporary, cancellationToken);
+            if (validation.Manifest is null)
+            {
+                throw new InvalidDataException(string.Join("; ", validation.Errors));
+            }
+            Directory.Move(temporary, destination);
+            return new ManagedSlotBaselineResult(true, destination, manifest, []);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+        {
+            if (Directory.Exists(temporary)) Directory.Delete(temporary, recursive: true);
+            return ManagedSlotBaselineFailed(exception.Message);
+        }
+    }
+
+    public async Task<PortableImportResult> ReplaceManagedSlotAsync(
+        PortableSaveArtifact artifact,
+        string baselineDirectory,
+        ManagedSlotReference slot,
+        string expectedPlayerName,
+        string preImportBackupOutputRoot,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(expectedPlayerName)) return ImportFailed("Le pseudo du joueur local attendu est obligatoire.");
+        if (ProbeProcesses().Count > 0) return ImportFailed("Fermez complètement The Planet Crafter avant le remplacement du slot permanent.");
+
+        var artifactValidation = await ValidateArtifactAsync(artifact, cancellationToken);
+        if (!artifactValidation.IsValid) return ImportFailed(artifactValidation.Errors);
+        var (artifactManifest, payload) = await ReadPortableArtifactAsync(artifact.Path, cancellationToken);
+        if (!artifactManifest.DisplayName.Equals(slot.DesiredDisplayName, StringComparison.Ordinal))
+        {
+            return ImportFailed(
+                $"Le nom affiché de l'artefact préparé doit être exactement '{slot.DesiredDisplayName}'.");
+        }
+
+        var hostGuard = PlanetCrafterWorldTransformer.PrepareForHost(
+            payload,
+            artifactManifest.Players,
+            expectedPlayerName,
+            artifactManifest.DisplayName);
+        if (!hostGuard.Success)
+        {
+            var topologyPrefix = hostGuard.Outcome == HostPreparationOutcome.InvalidPlayerTopology
+                ? "La topologie des joueurs de l'artefact est invalide."
+                : "L'artefact n'est pas importable pour ce joueur.";
+            return ImportFailed([topologyPrefix, .. hostGuard.Errors]);
+        }
+        if (hostGuard.Outcome != HostPreparationOutcome.AlreadyHost || hostGuard.Changed)
+        {
+            return ImportFailed(
+                "L'artefact n'a pas été préparé pour ce joueur : le joueur attendu doit déjà être ID 0 et l'unique hôte.");
+        }
+
+        var baselineValidation = await ValidateManagedSlotBaselineSourceAsync(baselineDirectory, cancellationToken);
+        if (baselineValidation.Manifest is null) return ImportFailed(baselineValidation.Errors);
+        var baseline = baselineValidation.Manifest;
+        var referenceErrors = VerifyManagedSlotReference(baseline, slot);
+        if (referenceErrors.Count > 0) return ImportFailed(referenceErrors);
+
+        var detection = await DetectInstallationAsync(cancellationToken);
+        if (detection.WgsRoot is null) return ImportFailed("Stockage WGS courant introuvable.");
+        if (PathsOverlap(baselineDirectory, detection.WgsRoot))
+        {
+            return ImportFailed("La baseline du slot permanent doit être séparée du stockage WGS courant.");
+        }
+        if (PathsOverlap(preImportBackupOutputRoot, detection.WgsRoot))
+        {
+            return ImportFailed("Le dossier de snapshot pré-import doit être séparé du stockage WGS courant.");
+        }
+
+        var current = await InspectLocalStorageAsync(cancellationToken);
+        if (!current.Stable || current.GameRunning) return ImportFailed("Le stockage WGS courant n'est pas stable.");
+        var topologyErrors = VerifyManagedSlotWorldTopology(baseline, current);
+        if (topologyErrors.Count > 0) return ImportFailed(topologyErrors);
+        var protectedErrors = VerifyProtectedWorlds(baseline, current);
+        if (protectedErrors.Count > 0) return ImportFailed(protectedErrors);
+
+        var target = current.Worlds.Single(world => world.LogicalName.Equals(baseline.Target.LogicalName, StringComparison.OrdinalIgnoreCase));
+        var currentHash = GetWorldPayloadHash(current, target);
+        var importedHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(payload));
+        if (currentHash.Equals(importedHash, StringComparison.OrdinalIgnoreCase))
+        {
+            var idempotentErrors = VerifyImportedManagedTarget(baseline, artifactManifest, current, target, importedHash);
+            return idempotentErrors.Count == 0
+                ? new PortableImportResult(
+                    true,
+                    target.LogicalName,
+                    target.DisplayName,
+                    null,
+                    baseline.Target.BeforePayloadSha256,
+                    importedHash,
+                    [])
+                : new PortableImportResult(
+                    false,
+                    target.LogicalName,
+                    target.DisplayName,
+                    null,
+                    baseline.Target.BeforePayloadSha256,
+                    null,
+                    idempotentErrors);
+        }
+        if (!currentHash.Equals(baseline.Target.BeforePayloadSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            return ImportFailed("Le contenu du slot permanent ne correspond plus à la baseline déclarée.");
+        }
+        if (!target.DisplayName.Equals(baseline.Target.CurrentDisplayName, StringComparison.Ordinal))
+        {
+            return ImportFailed("Le nom affiché courant du slot permanent ne correspond plus à la baseline.");
+        }
+
+        var preImportSnapshot = await CreateSafetySnapshotAsync(
+            preImportBackupOutputRoot,
+            target.DisplayName,
+            cancellationToken);
+        if (!preImportSnapshot.Success || preImportSnapshot.SnapshotDirectory is null)
+        {
+            return ImportFailed(["Impossible de créer le snapshot automatique juste avant le remplacement.", .. preImportSnapshot.Errors]);
+        }
+
+        var targetBlob = ResolveContainedPath(detection.WgsRoot, target.BlobRelativePath);
+        var previousHash = await FileSafety.ComputeSha256Async(targetBlob, cancellationToken);
+        var temporary = Path.Combine(Path.GetDirectoryName(targetBlob)!, $".gsh-managed-import-{Guid.NewGuid():N}.tmp");
+        var writePerformed = false;
+        try
+        {
+            await WriteBytesWithFlushAsync(payload, temporary, cancellationToken);
+            if (!importedHash.Equals(await FileSafety.ComputeSha256Async(temporary, cancellationToken), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("Le hash du fichier temporaire de remplacement est invalide.");
+            }
+
+            var justBeforeWrite = await InspectLocalStorageAsync(cancellationToken);
+            if (justBeforeWrite.GameRunning || !justBeforeWrite.Stable)
+            {
+                throw new IOException("Le jeu a été lancé ou WGS a changé juste avant l'écriture du slot permanent.");
+            }
+            var lastTopologyErrors = VerifyManagedSlotWorldTopology(baseline, justBeforeWrite);
+            if (lastTopologyErrors.Count > 0)
+            {
+                throw new IOException("La topologie WGS a changé juste avant l'écriture : " + string.Join("; ", lastTopologyErrors));
+            }
+            var lastProtectedErrors = VerifyProtectedWorlds(baseline, justBeforeWrite);
+            if (lastProtectedErrors.Count > 0)
+            {
+                throw new IOException("Une sauvegarde protégée a changé juste avant l'écriture : " + string.Join("; ", lastProtectedErrors));
+            }
+            var lastTarget = justBeforeWrite.Worlds.Single(world =>
+                world.LogicalName.Equals(baseline.Target.LogicalName, StringComparison.OrdinalIgnoreCase));
+            var lastTargetHash = GetWorldPayloadHash(justBeforeWrite, lastTarget);
+            if (!lastTargetHash.Equals(baseline.Target.BeforePayloadSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("Le slot permanent a changé juste avant l'écriture.");
+            }
+            var currentTargetBlob = ResolveContainedPath(detection.WgsRoot, lastTarget.BlobRelativePath);
+            if (!Path.GetFullPath(currentTargetBlob).Equals(Path.GetFullPath(targetBlob), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("Le blob physique du slot permanent a tourné juste avant l'écriture.");
+            }
+
+            File.Move(temporary, targetBlob, overwrite: true);
+            writePerformed = true;
+            var finalHash = await FileSafety.ComputeSha256Async(targetBlob, cancellationToken);
+            if (!finalHash.Equals(importedHash, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("Le hash après remplacement ne correspond pas au payload préparé.");
+            }
+
+            var after = await InspectLocalStorageAsync(cancellationToken);
+            if (!after.Stable || after.GameRunning) throw new IOException("WGS n'est pas stable après le remplacement.");
+            var afterTopologyErrors = VerifyManagedSlotWorldTopology(baseline, after);
+            if (afterTopologyErrors.Count > 0)
+            {
+                throw new IOException("La topologie WGS a changé après le remplacement : " + string.Join("; ", afterTopologyErrors));
+            }
+            var afterProtectedErrors = VerifyProtectedWorlds(baseline, after);
+            if (afterProtectedErrors.Count > 0)
+            {
+                throw new IOException("Une sauvegarde protégée a changé après le remplacement : " + string.Join("; ", afterProtectedErrors));
+            }
+            var importedWorld = after.Worlds.Single(world =>
+                world.LogicalName.Equals(baseline.Target.LogicalName, StringComparison.OrdinalIgnoreCase));
+            var importedErrors = VerifyImportedManagedTarget(baseline, artifactManifest, after, importedWorld, importedHash);
+            if (importedErrors.Count > 0)
+            {
+                throw new IOException("Le slot permanent est invalide après le remplacement : " + string.Join("; ", importedErrors));
+            }
+
+            return new PortableImportResult(
+                true,
+                importedWorld.LogicalName,
+                importedWorld.DisplayName,
+                preImportSnapshot.SnapshotDirectory,
+                previousHash,
+                importedHash,
+                []);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+            var errors = new List<string> { exception.Message };
+            if (writePerformed)
+            {
+                try
+                {
+                    await RestoreFullSnapshotAsync(
+                        preImportSnapshot.SnapshotDirectory,
+                        detection.WgsRoot,
+                        cancellationToken);
+                    errors.Add("Le snapshot pré-import complet a été restauré automatiquement après l'échec.");
+                }
+                catch (Exception rollbackException) when (rollbackException is IOException or InvalidDataException or UnauthorizedAccessException)
+                {
+                    errors.Add("ÉCHEC DU ROLLBACK AUTOMATIQUE : " + rollbackException.Message);
+                }
+            }
+            return new PortableImportResult(
+                false,
+                target.LogicalName,
+                target.DisplayName,
+                preImportSnapshot.SnapshotDirectory,
+                previousHash,
+                null,
+                errors);
+        }
+    }
+
+    public async Task<ManagedSlotReconciliationResult> ReconcileManagedSlotReplacementAsync(
+        PortableSaveArtifact artifact,
+        string baselineDirectory,
+        ManagedSlotReference slot,
+        string expectedPlayerName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(expectedPlayerName))
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.InvalidArtifact,
+                slot.LogicalName,
+                null,
+                null,
+                ["Le pseudo du joueur local attendu est obligatoire."]);
+        }
+        if (ProbeProcesses().Count > 0)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.UnexpectedTargetContent,
+                slot.LogicalName,
+                null,
+                null,
+                ["Fermez complètement The Planet Crafter avant la réconciliation du slot permanent."]);
+        }
+
+        var artifactValidation = await ValidateArtifactAsync(artifact, cancellationToken);
+        if (!artifactValidation.IsValid)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.InvalidArtifact,
+                slot.LogicalName,
+                null,
+                null,
+                artifactValidation.Errors);
+        }
+
+        PortableArtifactManifest artifactManifest;
+        byte[] payload;
+        try
+        {
+            (artifactManifest, payload) = await ReadPortableArtifactAsync(artifact.Path, cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.InvalidArtifact,
+                slot.LogicalName,
+                null,
+                null,
+                [exception.Message]);
+        }
+        var importedHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(payload));
+        if (!artifactManifest.DisplayName.Equals(slot.DesiredDisplayName, StringComparison.Ordinal))
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.InvalidArtifact,
+                slot.LogicalName,
+                null,
+                importedHash,
+                ["Le nom affiché de l'artefact ne correspond pas au nom permanent désiré."]);
+        }
+        var hostGuard = PlanetCrafterWorldTransformer.PrepareForHost(
+            payload,
+            artifactManifest.Players,
+            expectedPlayerName,
+            artifactManifest.DisplayName);
+        if (!hostGuard.Success || hostGuard.Outcome != HostPreparationOutcome.AlreadyHost || hostGuard.Changed)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.InvalidArtifact,
+                slot.LogicalName,
+                null,
+                importedHash,
+                ["L'artefact n'est pas préparé pour le joueur attendu.", .. hostGuard.Errors]);
+        }
+
+        var baselineValidation = await ValidateManagedSlotBaselineSourceAsync(baselineDirectory, cancellationToken);
+        if (baselineValidation.Manifest is null)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.InvalidBaseline,
+                slot.LogicalName,
+                null,
+                importedHash,
+                baselineValidation.Errors);
+        }
+        var baseline = baselineValidation.Manifest;
+        var referenceErrors = VerifyManagedSlotReference(baseline, slot);
+        if (referenceErrors.Count > 0)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.InvalidBaseline,
+                slot.LogicalName,
+                null,
+                importedHash,
+                referenceErrors);
+        }
+
+        var detection = await DetectInstallationAsync(cancellationToken);
+        if (detection.WgsRoot is null)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.TargetMissing,
+                baseline.Target.LogicalName,
+                null,
+                importedHash,
+                ["Stockage WGS courant introuvable."]);
+        }
+        if (PathsOverlap(baselineDirectory, detection.WgsRoot))
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.InvalidBaseline,
+                baseline.Target.LogicalName,
+                null,
+                importedHash,
+                ["La baseline du slot permanent doit être séparée du stockage WGS courant."]);
+        }
+
+        LocalStorageInspection current;
+        try
+        {
+            current = await InspectLocalStorageAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.TargetMissing,
+                baseline.Target.LogicalName,
+                null,
+                importedHash,
+                [exception.Message]);
+        }
+        if (!current.Stable || current.GameRunning)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.UnexpectedTargetContent,
+                baseline.Target.LogicalName,
+                null,
+                importedHash,
+                ["Le stockage WGS courant n'est pas stable."]);
+        }
+
+        var protectedErrors = VerifyProtectedWorlds(baseline, current);
+        if (protectedErrors.Count > 0)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.ProtectedWorldChanged,
+                baseline.Target.LogicalName,
+                null,
+                importedHash,
+                protectedErrors);
+        }
+
+        var targets = current.Worlds
+            .Where(world => world.LogicalName.Equals(baseline.Target.LogicalName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (targets.Length == 0)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.TargetMissing,
+                baseline.Target.LogicalName,
+                null,
+                importedHash,
+                ["Le slot logique déclaré n'existe plus."]);
+        }
+        if (targets.Length != 1)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.UnexpectedTargetContent,
+                baseline.Target.LogicalName,
+                null,
+                importedHash,
+                ["Le slot logique déclaré est ambigu."]);
+        }
+
+        var topologyErrors = VerifyManagedSlotWorldTopology(baseline, current);
+        var target = targets[0];
+        var currentHash = GetWorldPayloadHash(current, target);
+        if (topologyErrors.Count > 0)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.UnexpectedTargetContent,
+                baseline.Target.LogicalName,
+                currentHash,
+                importedHash,
+                topologyErrors);
+        }
+        if (currentHash.Equals(baseline.Target.BeforePayloadSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.PreviousPayloadPresent,
+                baseline.Target.LogicalName,
+                currentHash,
+                importedHash,
+                []);
+        }
+        if (currentHash.Equals(importedHash, StringComparison.OrdinalIgnoreCase))
+        {
+            var importedErrors = VerifyImportedManagedTarget(baseline, artifactManifest, current, target, importedHash);
+            return importedErrors.Count == 0
+                ? new ManagedSlotReconciliationResult(
+                    ManagedSlotReconciliationState.ImportedPayloadPresent,
+                    baseline.Target.LogicalName,
+                    currentHash,
+                    importedHash,
+                    [])
+                : new ManagedSlotReconciliationResult(
+                    ManagedSlotReconciliationState.UnexpectedTargetContent,
+                    baseline.Target.LogicalName,
+                    currentHash,
+                    importedHash,
+                    importedErrors);
+        }
+
+        return new ManagedSlotReconciliationResult(
+            ManagedSlotReconciliationState.UnexpectedTargetContent,
+            baseline.Target.LogicalName,
+            currentHash,
+            importedHash,
+            ["Le slot cible ne contient ni le payload précédent de la baseline ni l'artefact préparé."]);
+    }
+
     public async Task<ImportBaselineResult> CreateImportBaselineAsync(
         string outputRoot,
         CancellationToken cancellationToken = default)
@@ -1471,6 +2032,362 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         }
     }
 
+    private async Task<(ManagedSlotBaselineManifest? Manifest, IReadOnlyList<string> Errors)> ValidateManagedSlotBaselineSourceAsync(
+        string baselineDirectory,
+        CancellationToken cancellationToken)
+    {
+        string root;
+        try
+        {
+            root = Path.GetFullPath(baselineDirectory);
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return (null, [$"Chemin de baseline invalide : {exception.Message}"]);
+        }
+
+        var manifestPath = Path.Combine(root, "managed-slot-baseline.json");
+        if (!File.Exists(manifestPath)) return (null, ["Manifeste de baseline du slot permanent absent."]);
+        ManagedSlotBaselineManifest? manifest;
+        try
+        {
+            await using var stream = File.OpenRead(manifestPath);
+            manifest = await JsonSerializer.DeserializeAsync<ManagedSlotBaselineManifest>(stream, JsonOptions, cancellationToken);
+        }
+        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return (null, [$"Manifeste de baseline du slot permanent invalide : {exception.Message}"]);
+        }
+
+        if (manifest is null ||
+            manifest.SchemaVersion != 1 ||
+            !string.Equals(manifest.AdapterId, AdapterId, StringComparison.Ordinal) ||
+            !string.Equals(manifest.PackageFamilyName, _options.PackageFamilyName, StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(manifest.SnapshotId) ||
+            manifest.Target is null ||
+            manifest.Files is null ||
+            manifest.ProtectedWorlds is null)
+        {
+            return (null, ["Baseline du slot permanent absente, incompatible ou non reconnue."]);
+        }
+
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(manifest.Target.LogicalName) ||
+            string.IsNullOrWhiteSpace(manifest.Target.CurrentDisplayName) ||
+            string.IsNullOrWhiteSpace(manifest.Target.DesiredDisplayName) ||
+            string.IsNullOrWhiteSpace(manifest.Target.BeforePayloadSha256))
+        {
+            errors.Add("La cible de la baseline du slot permanent est incomplète.");
+        }
+        if (manifest.Files.Any(file =>
+                file is null ||
+                string.IsNullOrWhiteSpace(file.RelativePath) ||
+                string.IsNullOrWhiteSpace(file.Sha256) ||
+                file.Length < 0))
+        {
+            return (null, ["La liste de fichiers de la baseline contient une entrée invalide."]);
+        }
+        if (manifest.ProtectedWorlds.Any(world =>
+                world is null ||
+                string.IsNullOrWhiteSpace(world.LogicalName) ||
+                string.IsNullOrWhiteSpace(world.DisplayName) ||
+                string.IsNullOrWhiteSpace(world.PayloadSha256)))
+        {
+            return (null, ["La liste des mondes protégés contient une entrée invalide."]);
+        }
+        if (manifest.Files.Select(file => file.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count() != manifest.Files.Count)
+        {
+            errors.Add("La liste de fichiers de la baseline contient des chemins dupliqués.");
+        }
+        if (manifest.ProtectedWorlds.Select(world => world.LogicalName).Distinct(StringComparer.OrdinalIgnoreCase).Count() != manifest.ProtectedWorlds.Count)
+        {
+            errors.Add("La liste des mondes protégés contient des noms logiques dupliqués.");
+        }
+        if (manifest.ProtectedWorlds.Any(world =>
+                world.LogicalName.Equals(manifest.Target.LogicalName, StringComparison.OrdinalIgnoreCase)))
+        {
+            errors.Add("Le slot cible ne peut pas figurer parmi les mondes protégés.");
+        }
+
+        var snapshotWgs = Path.Combine(root, "wgs");
+        if (!Directory.Exists(snapshotWgs))
+        {
+            errors.Add("Copie WGS de la baseline du slot permanent absente.");
+            return (null, errors);
+        }
+
+        try
+        {
+            var expectedFiles = manifest.Files
+                .Select(file => file.RelativePath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var actualFiles = EnumerateSafeFiles(snapshotWgs)
+                .Select(path => FileSafety.GetSafeRelativePath(snapshotWgs, path))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (!expectedFiles.SetEquals(actualFiles))
+            {
+                errors.Add("La copie WGS ne correspond pas à la liste complète de fichiers du manifeste.");
+            }
+
+            foreach (var file in manifest.Files)
+            {
+                var path = ResolveContainedPath(snapshotWgs, file.RelativePath);
+                if (!File.Exists(path))
+                {
+                    errors.Add($"Fichier de baseline absent : {file.RelativePath}");
+                    continue;
+                }
+                var info = new FileInfo(path);
+                var hash = await FileSafety.ComputeSha256Async(path, cancellationToken);
+                if (info.Length != file.Length || !hash.Equals(file.Sha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"Fichier de baseline invalide : {file.RelativePath}");
+                }
+            }
+
+            var (worlds, discoveryWarnings) = await DiscoverWorldsAsync(snapshotWgs, cancellationToken);
+            if (discoveryWarnings.Count > 0)
+            {
+                errors.AddRange(discoveryWarnings.Select(warning => "Baseline WGS non interprétable : " + warning));
+            }
+            var expectedWorldNames = manifest.ProtectedWorlds
+                .Select(world => world.LogicalName)
+                .Append(manifest.Target.LogicalName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var actualWorldNames = worlds.Select(world => world.LogicalName).ToArray();
+            if (actualWorldNames.Length != expectedWorldNames.Count ||
+                actualWorldNames.Distinct(StringComparer.OrdinalIgnoreCase).Count() != actualWorldNames.Length ||
+                !expectedWorldNames.SetEquals(actualWorldNames))
+            {
+                errors.Add("La topologie logique de la copie WGS ne correspond pas au manifeste.");
+            }
+
+            var targetWorlds = worlds
+                .Where(world => world.LogicalName.Equals(manifest.Target.LogicalName, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (targetWorlds.Length != 1)
+            {
+                errors.Add("La cible logique de la baseline est absente ou ambiguë dans la copie WGS.");
+            }
+            else
+            {
+                var target = targetWorlds[0];
+                var targetPath = ResolveContainedPath(snapshotWgs, target.BlobRelativePath);
+                var targetHash = await FileSafety.ComputeSha256Async(targetPath, cancellationToken);
+                if (!target.DisplayName.Equals(manifest.Target.CurrentDisplayName, StringComparison.Ordinal) ||
+                    target.WorldSeed != manifest.Target.WorldSeed ||
+                    !targetHash.Equals(manifest.Target.BeforePayloadSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add("La cible de la copie WGS ne correspond pas au manifeste.");
+                }
+                var localPlayers = target.Players.Where(player => player.Id == 0).ToArray();
+                if (localPlayers.Length != 1 || !localPlayers[0].IsHost || target.Players.Count(player => player.IsHost) != 1)
+                {
+                    errors.Add("La cible de la baseline n'a pas un joueur local ID 0 unique et hôte.");
+                }
+            }
+
+            foreach (var protectedWorld in manifest.ProtectedWorlds)
+            {
+                var matches = worlds
+                    .Where(world => world.LogicalName.Equals(protectedWorld.LogicalName, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                if (matches.Length != 1)
+                {
+                    errors.Add($"Monde protégé absent ou ambigu dans la baseline : {protectedWorld.LogicalName}");
+                    continue;
+                }
+                var world = matches[0];
+                var worldPath = ResolveContainedPath(snapshotWgs, world.BlobRelativePath);
+                var worldHash = await FileSafety.ComputeSha256Async(worldPath, cancellationToken);
+                if (!world.DisplayName.Equals(protectedWorld.DisplayName, StringComparison.Ordinal) ||
+                    world.WorldSeed != protectedWorld.WorldSeed ||
+                    !worldHash.Equals(protectedWorld.PayloadSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"Monde protégé invalide dans la baseline : {protectedWorld.LogicalName}");
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
+        {
+            errors.Add("Validation de la baseline impossible : " + exception.Message);
+        }
+
+        return errors.Count == 0 ? (manifest, []) : (null, errors);
+    }
+
+    private static List<string> VerifyManagedSlotReference(
+        ManagedSlotBaselineManifest baseline,
+        ManagedSlotReference slot)
+    {
+        var errors = new List<string>();
+        if (!baseline.Target.LogicalName.Equals(slot.LogicalName, StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add("Le nom logique lié ne correspond pas à la cible de la baseline.");
+        }
+        if (!baseline.Target.CurrentDisplayName.Equals(slot.CurrentDisplayName, StringComparison.Ordinal))
+        {
+            errors.Add("Le nom affiché courant lié ne correspond pas à la baseline.");
+        }
+        if (!baseline.Target.DesiredDisplayName.Equals(slot.DesiredDisplayName, StringComparison.Ordinal))
+        {
+            errors.Add("Le nom affiché permanent désiré ne correspond pas à la baseline.");
+        }
+        return errors;
+    }
+
+    private static List<string> VerifyManagedSlotWorldTopology(
+        ManagedSlotBaselineManifest baseline,
+        LocalStorageInspection current)
+    {
+        var expected = baseline.ProtectedWorlds
+            .Select(world => world.LogicalName)
+            .Append(baseline.Target.LogicalName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var actual = current.Worlds.Select(world => world.LogicalName).ToArray();
+        return actual.Length == expected.Count &&
+               actual.Distinct(StringComparer.OrdinalIgnoreCase).Count() == actual.Length &&
+               expected.SetEquals(actual)
+            ? []
+            : ["La topologie logique WGS ne correspond plus à la baseline du slot permanent."];
+    }
+
+    private static List<string> VerifyProtectedWorlds(
+        ManagedSlotBaselineManifest baseline,
+        LocalStorageInspection current)
+    {
+        var errors = new List<string>();
+        foreach (var protectedWorld in baseline.ProtectedWorlds)
+        {
+            var matches = current.Worlds
+                .Where(world => world.LogicalName.Equals(protectedWorld.LogicalName, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (matches.Length != 1)
+            {
+                errors.Add($"Monde protégé absent ou ambigu : {protectedWorld.LogicalName}");
+                continue;
+            }
+            var currentWorld = matches[0];
+            var hash = GetWorldPayloadHash(current, currentWorld);
+            if (!hash.Equals(protectedWorld.PayloadSha256, StringComparison.OrdinalIgnoreCase) ||
+                !currentWorld.DisplayName.Equals(protectedWorld.DisplayName, StringComparison.Ordinal) ||
+                currentWorld.WorldSeed != protectedWorld.WorldSeed)
+            {
+                errors.Add($"Monde protégé modifié : {protectedWorld.LogicalName}");
+            }
+        }
+        return errors;
+    }
+
+    private static List<string> VerifyImportedManagedTarget(
+        ManagedSlotBaselineManifest baseline,
+        PortableArtifactManifest artifact,
+        LocalStorageInspection current,
+        DiscoveredWorld target,
+        string importedHash)
+    {
+        var errors = new List<string>();
+        if (!target.LogicalName.Equals(baseline.Target.LogicalName, StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add("Le nom logique du slot cible a changé.");
+        }
+        if (!GetWorldPayloadHash(current, target).Equals(importedHash, StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add("Le hash du slot cible ne correspond pas à l'artefact préparé.");
+        }
+        if (!target.DisplayName.Equals(baseline.Target.DesiredDisplayName, StringComparison.Ordinal) ||
+            !target.DisplayName.Equals(artifact.DisplayName, StringComparison.Ordinal))
+        {
+            errors.Add("Le nom affiché du slot cible ne correspond pas au nom permanent désiré.");
+        }
+        if (target.WorldSeed != artifact.WorldSeed || !PlayersEquivalent(target.Players, artifact.Players))
+        {
+            errors.Add("La structure sémantique du slot cible ne correspond pas à l'artefact préparé.");
+        }
+        return errors;
+    }
+
+    private bool PathsOverlap(string left, string right)
+    {
+        var fullLeft = Path.GetFullPath(left);
+        var fullRight = Path.GetFullPath(right);
+        var finalPathResolver = _options.FinalPathResolver ?? Path.GetFullPath;
+        var resolvedLeft = finalPathResolver(fullLeft);
+        var resolvedRight = finalPathResolver(fullRight);
+        return FileSafety.IsSameOrDescendant(fullLeft, fullRight) ||
+               FileSafety.IsSameOrDescendant(fullRight, fullLeft) ||
+               FileSafety.IsSameOrDescendant(resolvedLeft, resolvedRight) ||
+               FileSafety.IsSameOrDescendant(resolvedRight, resolvedLeft);
+    }
+
+    private static async Task RestoreFullSnapshotAsync(
+        string snapshotDirectory,
+        string currentWgsRoot,
+        CancellationToken cancellationToken)
+    {
+        var snapshotRoot = Path.GetFullPath(snapshotDirectory);
+        var validation = await ValidateSnapshotSourceAsync(
+            snapshotRoot,
+            Path.Combine(snapshotRoot, "snapshot-manifest.json"),
+            cancellationToken);
+        if (validation.Manifest is null)
+        {
+            throw new InvalidDataException("Snapshot de rollback invalide : " + string.Join("; ", validation.Errors));
+        }
+
+        var snapshotWgs = Path.Combine(snapshotRoot, "wgs");
+        var staged = new List<(string Temporary, string Destination, string ExpectedSha256)>();
+        try
+        {
+            foreach (var file in validation.Manifest.Files)
+            {
+                var source = ResolveContainedPath(snapshotWgs, file.RelativePath);
+                var destination = ResolveContainedPath(currentWgsRoot, file.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                var temporary = Path.Combine(Path.GetDirectoryName(destination)!, $".gsh-full-rollback-{Guid.NewGuid():N}.tmp");
+                await CopyWithFlushAsync(source, temporary, cancellationToken);
+                var stagedHash = await FileSafety.ComputeSha256Async(temporary, cancellationToken);
+                if (!stagedHash.Equals(file.Sha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new IOException($"Hash de staging de rollback invalide : {file.RelativePath}");
+                }
+                staged.Add((temporary, destination, file.Sha256));
+            }
+
+            foreach (var file in staged)
+            {
+                File.Move(file.Temporary, file.Destination, overwrite: true);
+            }
+
+            var expectedPaths = validation.Manifest.Files
+                .Select(file => file.RelativePath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var actualPaths = EnumerateSafeFiles(currentWgsRoot)
+                .Select(path => FileSafety.GetSafeRelativePath(currentWgsRoot, path))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (!expectedPaths.SetEquals(actualPaths))
+            {
+                throw new IOException("Le rollback n'a pas restauré la liste complète des fichiers WGS.");
+            }
+            foreach (var file in validation.Manifest.Files)
+            {
+                var destination = ResolveContainedPath(currentWgsRoot, file.RelativePath);
+                var actualHash = await FileSafety.ComputeSha256Async(destination, cancellationToken);
+                if (!actualHash.Equals(file.Sha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new IOException($"Le rollback n'a pas restauré le hash attendu : {file.RelativePath}");
+                }
+            }
+        }
+        finally
+        {
+            foreach (var file in staged)
+            {
+                if (File.Exists(file.Temporary)) File.Delete(file.Temporary);
+            }
+        }
+    }
+
     private static async Task<(ImportBaselineManifest? Manifest, IReadOnlyList<string> Errors)> ValidateImportBaselineSourceAsync(
         string baselineDirectory,
         CancellationToken cancellationToken)
@@ -1594,6 +2511,7 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         if (!actualHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase)) throw new IOException("Le rollback n'a pas restauré le hash attendu.");
     }
 
+    private static ManagedSlotBaselineResult ManagedSlotBaselineFailed(string error) => new(false, null, null, [error]);
     private static ImportBaselineResult ImportBaselineFailed(string error) => new(false, null, null, [error]);
     private static PortableImportResult ImportFailed(string error) => new(false, null, null, null, null, null, [error]);
     private static PortableImportResult ImportFailed(IReadOnlyList<string> errors) => new(false, null, null, null, null, null, errors);

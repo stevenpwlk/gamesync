@@ -139,6 +139,52 @@ public sealed record ImportProtectedWorld(
     long? WorldSeed,
     string PayloadSha256);
 
+public sealed record ManagedSlotReference(
+    string LogicalName,
+    string CurrentDisplayName,
+    string DesiredDisplayName);
+
+public sealed record ManagedSlotBaselineTarget(
+    string LogicalName,
+    string CurrentDisplayName,
+    string DesiredDisplayName,
+    long? WorldSeed,
+    string BeforePayloadSha256);
+
+public sealed record ManagedSlotBaselineManifest(
+    int SchemaVersion,
+    string SnapshotId,
+    string AdapterId,
+    string PackageFamilyName,
+    DateTimeOffset CapturedAtUtc,
+    ManagedSlotBaselineTarget Target,
+    IReadOnlyList<ImportProtectedWorld> ProtectedWorlds,
+    IReadOnlyList<DiagnosticFile> Files);
+
+public sealed record ManagedSlotBaselineResult(
+    bool Success,
+    string? BaselineDirectory,
+    ManagedSlotBaselineManifest? Manifest,
+    IReadOnlyList<string> Errors);
+
+public enum ManagedSlotReconciliationState
+{
+    PreviousPayloadPresent,
+    ImportedPayloadPresent,
+    TargetMissing,
+    ProtectedWorldChanged,
+    UnexpectedTargetContent,
+    InvalidBaseline,
+    InvalidArtifact
+}
+
+public sealed record ManagedSlotReconciliationResult(
+    ManagedSlotReconciliationState State,
+    string? TargetLogicalName,
+    string? CurrentPayloadSha256,
+    string? ExpectedImportedPayloadSha256,
+    IReadOnlyList<string> Errors);
+
 public sealed record ImportBaselineManifest(
     int SchemaVersion,
     string SnapshotId,

@@ -20,6 +20,26 @@ public interface IGameSaveAdapter
     Task<PortableSaveArtifact> ExportPortableArtifactByLogicalNameAsync(string logicalName, string outputRoot, CancellationToken cancellationToken = default);
     Task<ArtifactValidation> ValidateArtifactAsync(PortableSaveArtifact artifact, CancellationToken cancellationToken = default);
     Task<HostPreparation> PrepareForHostAsync(PortableSaveArtifact artifact, string playerName, string targetDisplayName, string outputRoot, CancellationToken cancellationToken = default);
+    Task<ManagedSlotBaselineResult> CreateManagedSlotBaselineAsync(
+        ManagedSlotReference slot,
+        string outputRoot,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<ManagedSlotBaselineResult>(new NotSupportedException("Le remplacement de slot permanent n'est pas pris en charge par cet adaptateur."));
+    Task<PortableImportResult> ReplaceManagedSlotAsync(
+        PortableSaveArtifact artifact,
+        string baselineDirectory,
+        ManagedSlotReference slot,
+        string expectedPlayerName,
+        string preImportBackupOutputRoot,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<PortableImportResult>(new NotSupportedException("Le remplacement de slot permanent n'est pas pris en charge par cet adaptateur."));
+    Task<ManagedSlotReconciliationResult> ReconcileManagedSlotReplacementAsync(
+        PortableSaveArtifact artifact,
+        string baselineDirectory,
+        ManagedSlotReference slot,
+        string expectedPlayerName,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<ManagedSlotReconciliationResult>(new NotSupportedException("La réconciliation de slot permanent n'est pas prise en charge par cet adaptateur."));
     Task<ImportBaselineResult> CreateImportBaselineAsync(string outputRoot, CancellationToken cancellationToken = default);
     Task<ImportTargetProbeResult> ProbeImportTargetAsync(
         string baselineDirectory,
