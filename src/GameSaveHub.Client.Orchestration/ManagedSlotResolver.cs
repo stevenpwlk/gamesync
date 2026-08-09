@@ -17,6 +17,8 @@ public static class ManagedSlotResolver
         ArgumentNullException.ThrowIfNull(inspection);
         ArgumentException.ThrowIfNullOrWhiteSpace(packageFamilyName);
         ArgumentException.ThrowIfNullOrWhiteSpace(playerName);
+        if (!inspection.PackageFamilyName.Equals(packageFamilyName, StringComparison.Ordinal))
+            return Stop(ManagedSlotStatus.BindingMismatch, "inspection_package_mismatch");
 
         if (binding is not null)
         {
@@ -32,7 +34,7 @@ public static class ManagedSlotResolver
             return ResolveCandidate(
                 boundWorlds[0],
                 playerName,
-                boundWorlds[0].DisplayName.Equals(binding.DesiredDisplayName, StringComparison.Ordinal)
+                boundWorlds[0].DisplayName.Equals(DesiredDisplayName, StringComparison.Ordinal)
                     ? ManagedSlotStatus.Ready
                     : ManagedSlotStatus.RenamePending);
         }
@@ -61,8 +63,7 @@ public static class ManagedSlotResolver
     {
         if (!binding.AdapterId.Equals(inspection.AdapterId, StringComparison.Ordinal))
             return Stop(ManagedSlotStatus.BindingMismatch, "binding_adapter_mismatch");
-        if (!binding.PackageFamilyName.Equals(packageFamilyName, StringComparison.Ordinal) ||
-            !inspection.PackageFamilyName.Equals(packageFamilyName, StringComparison.Ordinal))
+        if (!binding.PackageFamilyName.Equals(packageFamilyName, StringComparison.Ordinal))
             return Stop(ManagedSlotStatus.BindingMismatch, "binding_package_mismatch");
         if (!NormalizePlayerName(binding.PlayerName).Equals(NormalizePlayerName(playerName), StringComparison.OrdinalIgnoreCase))
             return Stop(ManagedSlotStatus.BindingMismatch, "binding_player_mismatch");
@@ -74,9 +75,10 @@ public static class ManagedSlotResolver
         string playerName,
         ManagedSlotStatus successStatus)
     {
-        var hosts = candidate.Players.Where(player => player.Id == 0 && player.IsHost).ToArray();
-        if (hosts.Length != 1 ||
-            !NormalizePlayerName(hosts[0].Name).Equals(NormalizePlayerName(playerName), StringComparison.OrdinalIgnoreCase))
+        var playersWithIdZero = candidate.Players.Where(player => player.Id == 0).ToArray();
+        var hosts = candidate.Players.Where(player => player.IsHost).ToArray();
+        if (playersWithIdZero.Length != 1 || hosts.Length != 1 || !playersWithIdZero[0].IsHost ||
+            !NormalizePlayerName(playersWithIdZero[0].Name).Equals(NormalizePlayerName(playerName), StringComparison.OrdinalIgnoreCase))
             return new ManagedSlotResolution(ManagedSlotStatus.InvalidTopology, candidate, "invalid_host_topology");
 
         return new ManagedSlotResolution(successStatus, candidate, null);

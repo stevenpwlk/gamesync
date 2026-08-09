@@ -162,6 +162,66 @@ public sealed class ManagedSlotResolverTests
         Assert.Equal("Standard-5.json", result.Candidate!.LogicalName);
     }
 
+    [Fact]
+    public void ResolveRejectsUnboundInspectionForAnotherPackage()
+    {
+        var inspection = Inspection(World("Standard-5.json", DesiredName)) with { PackageFamilyName = "Other.Package_123" };
+
+        var result = ManagedSlotResolver.Resolve(null, inspection, Package, Player);
+
+        Assert.Equal(ManagedSlotStatus.BindingMismatch, result.Status);
+        Assert.Null(result.Candidate);
+        Assert.Equal("inspection_package_mismatch", result.SafetyStopCode);
+    }
+
+    [Fact]
+    public void ResolveRejectsSelectedWorldWithAnotherHost()
+    {
+        var result = ManagedSlotResolver.Resolve(
+            Binding(),
+            Inspection(World(
+                "Standard-5.json",
+                DesiredName,
+                new DiscoveredPlayer(0, Player, true, null, null, 3, 4),
+                new DiscoveredPlayer(7, "Alex", true, null, null, 5, 6))),
+            Package,
+            Player);
+
+        Assert.Equal(ManagedSlotStatus.InvalidTopology, result.Status);
+        Assert.Equal("invalid_host_topology", result.SafetyStopCode);
+    }
+
+    [Fact]
+    public void ResolveRejectsSelectedWorldWithAnotherPlayerIdZero()
+    {
+        var result = ManagedSlotResolver.Resolve(
+            Binding(),
+            Inspection(World(
+                "Standard-5.json",
+                DesiredName,
+                new DiscoveredPlayer(0, Player, true, null, null, 3, 4),
+                new DiscoveredPlayer(0, "Alex", false, null, null, 5, 6))),
+            Package,
+            Player);
+
+        Assert.Equal(ManagedSlotStatus.InvalidTopology, result.Status);
+        Assert.Equal("invalid_host_topology", result.SafetyStopCode);
+    }
+
+    [Fact]
+    public void ResolveUsesThePermanentDesiredDisplayNameInsteadOfBindingMetadata()
+    {
+        var result = ManagedSlotResolver.Resolve(
+            Binding() with { DesiredDisplayName = "AUTRE-NOM" },
+            Inspection(World("Standard-5.json", "AUTRE-NOM")),
+            Package,
+            Player);
+
+        Assert.Equal(ManagedSlotStatus.RenamePending, result.Status);
+        Assert.Equal("Standard-5.json", result.Candidate!.LogicalName);
+        Assert.Null(result.SafetyStopCode);
+    }
+
     private static ManagedSlotBinding Binding(string logicalName = "Standard-5.json") =>
         ManagedSlotBinding.Create(Adapter, Package, Player, logicalName, LegacyName, DesiredName, CapturedAtUtc);
 
