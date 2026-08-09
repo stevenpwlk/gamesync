@@ -13,10 +13,20 @@ internal static class PlanetCrafterWorldTransformer
         WriteIndented = false
     };
 
-    public static HostTransformResult PrepareForHost(byte[] payload, IReadOnlyList<DiscoveredPlayer> manifestPlayers, string requestedPlayerName)
+    public static HostTransformResult PrepareForHost(
+        byte[] payload,
+        IReadOnlyList<DiscoveredPlayer> manifestPlayers,
+        string requestedPlayerName,
+        string targetDisplayName)
     {
         ArgumentNullException.ThrowIfNull(payload);
         ArgumentNullException.ThrowIfNull(manifestPlayers);
+        var normalizedDisplayName = targetDisplayName?.Trim();
+        if (normalizedDisplayName is not { Length: >= 1 and <= 64 } ||
+            normalizedDisplayName.Any(character => character is < ' ' or > '~'))
+        {
+            return HostTransformResult.Failed(HostPreparationOutcome.InvalidDisplayName, "invalid_target_display_name");
+        }
         if (string.IsNullOrWhiteSpace(requestedPlayerName))
         {
             return HostTransformResult.Failed(HostPreparationOutcome.PlayerNotFound, "Le pseudo du joueur cible est vide.");
@@ -101,8 +111,39 @@ internal static class PlanetCrafterWorldTransformer
             }
         }
 
+        var displayNameLocations = new List<(int SectionIndex, JsonObject Node, string CurrentDisplayName)>();
+        for (var sectionIndex = 0; sectionIndex < sections.Length; sectionIndex++)
+        {
+            try
+            {
+                if (JsonNode.Parse(sections[sectionIndex]) is JsonObject node &&
+                    node["saveDisplayName"] is JsonValue value &&
+                    value.TryGetValue<string>(out var currentDisplayName))
+                {
+                    displayNameLocations.Add((sectionIndex, node, currentDisplayName));
+                }
+            }
+            catch (JsonException)
+            {
+                // Les sections multi-enregistrements ne sont pas des objets JSON racine uniques.
+            }
+        }
+        if (displayNameLocations.Count != 1)
+        {
+            return HostTransformResult.Failed(
+                HostPreparationOutcome.InvalidArtifact,
+                "Le payload doit contenir exactement une propriété racine saveDisplayName.");
+        }
+
+        var displayNameLocation = displayNameLocations[0];
+        var displayNameChanged = !displayNameLocation.CurrentDisplayName.Equals(normalizedDisplayName, StringComparison.Ordinal);
+        if (displayNameChanged)
+        {
+            displayNameLocation.Node["saveDisplayName"] = normalizedDisplayName;
+            sections[displayNameLocation.SectionIndex] = displayNameLocation.Node.ToJsonString(CompactJson);
+        }
+
         var transformedText = string.Join("\r@\r", sections);
-        var transformedPayload = StrictUtf8.GetBytes(transformedText);
         var expectedPlayers = manifestPlayers
             .Select(player => player.Id switch
             {
@@ -112,16 +153,26 @@ internal static class PlanetCrafterWorldTransformer
             })
             .OrderBy(player => player.Id)
             .ToArray();
+        var reparsed = PlanetCrafterWorldPayloadReader.Parse(string.Empty, transformedText, string.Empty);
+        if (reparsed is null ||
+            !reparsed.DisplayName.Equals(normalizedDisplayName, StringComparison.Ordinal) ||
+            !PlayersEquivalentForTopology(reparsed.Players.ToArray(), expectedPlayers))
+        {
+            return HostTransformResult.Failed(
+                HostPreparationOutcome.InvalidArtifact,
+                "Le payload transformé n'a pas conservé le nom cible et la topologie joueur attendue.");
+        }
 
         return new HostTransformResult(
             true,
             alreadyHost ? HostPreparationOutcome.AlreadyHost : HostPreparationOutcome.Prepared,
-            transformedPayload,
+            StrictUtf8.GetBytes(transformedText),
             target.Name,
             target.Id,
             currentLocal.Id,
-            !alreadyHost,
-            expectedPlayers,
+            !alreadyHost || displayNameChanged,
+            reparsed.DisplayName,
+            reparsed.Players,
             []);
 
         List<PlayerRecordLocation> FindPlayerRecords(string[] mutableSections)
@@ -259,11 +310,12 @@ internal static class PlanetCrafterWorldTransformer
         int? TargetPlayerOriginalId,
         int? PreviousHostPlayerId,
         bool Changed,
+        string? PreparedDisplayName,
         IReadOnlyList<DiscoveredPlayer>? PreparedPlayers,
         IReadOnlyList<string> Errors)
     {
         public static HostTransformResult Failed(HostPreparationOutcome outcome, string error) =>
-            new(false, outcome, null, null, null, null, false, null, [error]);
+            new(false, outcome, null, null, null, null, false, null, null, [error]);
     }
 
     private sealed record PlayerRecordLocation(JsonObject Node, DiscoveredPlayer Player, Action<string> ReplaceSerialized);

@@ -19,6 +19,7 @@ public sealed class TransferOrchestratorTests : IDisposable
         Assert.StartsWith("GSHIMPORT", result.Session!.PlaceholderName!, StringComparison.Ordinal);
         Assert.Equal(1, server.AcquireCalls);
         Assert.Equal(1, adapter.PrepareCalls);
+        Assert.Equal(ManagedSlotResolver.PermanentDisplayName, adapter.PreparedDisplayName);
         Assert.Equal(1, adapter.BaselineCalls);
     }
 
@@ -350,6 +351,7 @@ public sealed class TransferOrchestratorTests : IDisposable
         public HostPreparationOutcome PreparationOutcome { get; set; } = HostPreparationOutcome.Prepared;
         public ImportReconciliationState ReconciliationState { get; set; } = ImportReconciliationState.PlaceholderIntact;
         public int PrepareCalls { get; private set; }
+        public string? PreparedDisplayName { get; private set; }
         public int BaselineCalls { get; private set; }
         public int ImportCalls { get; private set; }
         public bool GameRunning { get; set; }
@@ -377,9 +379,10 @@ public sealed class TransferOrchestratorTests : IDisposable
             return await ExportPortableArtifactAsync(logicalName, outputRoot, cancellationToken);
         }
         public Task<ArtifactValidation> ValidateArtifactAsync(PortableSaveArtifact artifact, CancellationToken cancellationToken = default) => Task.FromResult(new ArtifactValidation(true, []));
-        public async Task<HostPreparation> PrepareForHostAsync(PortableSaveArtifact artifact, string playerName, string outputRoot, CancellationToken cancellationToken = default)
+        public async Task<HostPreparation> PrepareForHostAsync(PortableSaveArtifact artifact, string playerName, string targetDisplayName, string outputRoot, CancellationToken cancellationToken = default)
         {
             PrepareCalls++;
+            PreparedDisplayName = targetDisplayName;
             if (PreparationOutcome != HostPreparationOutcome.Prepared)
             {
                 return new HostPreparation(false, PreparationOutcome, null, playerName, null, null, false, ["guard"]);
@@ -387,7 +390,7 @@ public sealed class TransferOrchestratorTests : IDisposable
             Directory.CreateDirectory(outputRoot);
             var path = Path.Combine(outputRoot, "prepared.gshsave");
             await File.WriteAllBytesAsync(path, [5, 4, 3, 2, 1], cancellationToken);
-            var manifest = new PortableArtifactManifest(1, Id, DateTimeOffset.UtcNow, "Standard-1.json", "Shlags1", null, null, 1, "payload/world.save", 5, "payload-sha", [new DiscoveredPlayer(0, playerName, true, null, "0,0,0", 3, 4)]);
+            var manifest = new PortableArtifactManifest(1, Id, DateTimeOffset.UtcNow, "Standard-1.json", targetDisplayName, null, null, 1, "payload/world.save", 5, "payload-sha", [new DiscoveredPlayer(0, playerName, true, null, "0,0,0", 3, 4)]);
             return new HostPreparation(true, HostPreparationOutcome.Prepared, new PortableSaveArtifact(path, "prepared-sha", 5, manifest), playerName, 7, 0, true, []);
         }
         public Task<ImportBaselineResult> CreateImportBaselineAsync(string outputRoot, CancellationToken cancellationToken = default)

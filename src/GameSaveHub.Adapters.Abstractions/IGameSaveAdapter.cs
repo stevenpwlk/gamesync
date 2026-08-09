@@ -19,7 +19,7 @@ public interface IGameSaveAdapter
     /// </summary>
     Task<PortableSaveArtifact> ExportPortableArtifactByLogicalNameAsync(string logicalName, string outputRoot, CancellationToken cancellationToken = default);
     Task<ArtifactValidation> ValidateArtifactAsync(PortableSaveArtifact artifact, CancellationToken cancellationToken = default);
-    Task<HostPreparation> PrepareForHostAsync(PortableSaveArtifact artifact, string playerName, string outputRoot, CancellationToken cancellationToken = default);
+    Task<HostPreparation> PrepareForHostAsync(PortableSaveArtifact artifact, string playerName, string targetDisplayName, string outputRoot, CancellationToken cancellationToken = default);
     Task<ImportBaselineResult> CreateImportBaselineAsync(string outputRoot, CancellationToken cancellationToken = default);
     Task<ImportTargetProbeResult> ProbeImportTargetAsync(
         string baselineDirectory,

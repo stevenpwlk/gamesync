@@ -139,11 +139,12 @@ internal static class DiagnosticApplication
     {
         var artifactPath = ReadOption(args, "--artifact") ?? throw new ArgumentException("L'option --artifact est obligatoire.");
         var player = ReadOption(args, "--player") ?? throw new ArgumentException("L'option --player est obligatoire.");
+        var displayName = ReadOption(args, "--display-name") ?? throw new ArgumentException("L'option --display-name est obligatoire.");
         var output = ReadOption(args, "--output") ?? throw new ArgumentException("L'option --output est obligatoire.");
-        EnsureOnlyOptions(args, "--artifact", "--player", "--output");
+        EnsureOnlyOptions(args, "--artifact", "--player", "--display-name", "--output");
 
         var artifact = await LoadArtifactReferenceAsync(artifactPath);
-        var result = await adapter.PrepareForHostAsync(artifact, player, output);
+        var result = await adapter.PrepareForHostAsync(artifact, player, displayName, output);
         if (!result.Success)
         {
             Console.Error.WriteLine($"REFUS : {result.Outcome}");
@@ -350,6 +351,7 @@ internal static class DiagnosticApplication
                 args[index].Equals("--backup-output", StringComparison.OrdinalIgnoreCase) ||
                 args[index].Equals("--artifact", StringComparison.OrdinalIgnoreCase) ||
                 args[index].Equals("--player", StringComparison.OrdinalIgnoreCase) ||
+                args[index].Equals("--display-name", StringComparison.OrdinalIgnoreCase) ||
                 args[index].Equals("--baseline", StringComparison.OrdinalIgnoreCase) ||
                 args[index].Equals("--placeholder", StringComparison.OrdinalIgnoreCase)) index++;
         }
@@ -395,7 +397,7 @@ internal static class DiagnosticApplication
               restore-test-world --from-snapshot <capture> --test-world <nom> --backup-output <dossier> --acknowledge-test-world --acknowledge-offline
 
             Pilote cross-PC (feature gate serveur toujours fermé) :
-              prepare-host --artifact <fichier.gshsave> --player <pseudo-existant> --output <dossier>
+            prepare-host --artifact <fichier.gshsave> --player <pseudo-existant> --display-name <nom-permanent> --output <dossier>
               import-baseline --output <dossier>
               import-artifact --artifact <prepare.gshsave> --baseline <dossier-baseline> --player <pseudo-existant> --placeholder <nom> --backup-output <dossier> --acknowledge-pilot-import
 

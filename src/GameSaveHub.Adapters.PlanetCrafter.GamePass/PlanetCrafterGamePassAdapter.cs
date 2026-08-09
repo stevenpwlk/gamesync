@@ -521,6 +521,7 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
     public async Task<HostPreparation> PrepareForHostAsync(
         PortableSaveArtifact artifact,
         string playerName,
+        string targetDisplayName,
         string outputRoot,
         CancellationToken cancellationToken = default)
     {
@@ -533,8 +534,8 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         try
         {
             var (manifest, payload) = await ReadPortableArtifactAsync(artifact.Path, cancellationToken);
-            var transform = PlanetCrafterWorldTransformer.PrepareForHost(payload, manifest.Players, playerName);
-            if (!transform.Success || transform.Payload is null || transform.PreparedPlayers is null)
+            var transform = PlanetCrafterWorldTransformer.PrepareForHost(payload, manifest.Players, playerName, targetDisplayName);
+            if (!transform.Success || transform.Payload is null || transform.PreparedDisplayName is null || transform.PreparedPlayers is null)
             {
                 return new HostPreparation(
                     false,
@@ -551,6 +552,7 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
             var preparedManifest = manifest with
             {
                 CapturedAtUtc = DateTimeOffset.UtcNow,
+                DisplayName = transform.PreparedDisplayName,
                 PayloadLength = transform.Payload.LongLength,
                 PayloadSha256 = payloadHash,
                 Players = transform.PreparedPlayers
@@ -753,7 +755,7 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 artifactValidation.Errors);
         }
         var (artifactManifest, payload) = await ReadPortableArtifactAsync(artifact.Path, cancellationToken);
-        var hostGuard = PlanetCrafterWorldTransformer.PrepareForHost(payload, artifactManifest.Players, expectedPlayerName);
+        var hostGuard = PlanetCrafterWorldTransformer.PrepareForHost(payload, artifactManifest.Players, expectedPlayerName, artifactManifest.DisplayName);
         if (!hostGuard.Success || hostGuard.Outcome != HostPreparationOutcome.AlreadyHost || hostGuard.Changed)
         {
             return new ImportReconciliationResult(
@@ -881,7 +883,7 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         var artifactValidation = await ValidateArtifactAsync(artifact, cancellationToken);
         if (!artifactValidation.IsValid) return ImportFailed(artifactValidation.Errors);
         var (artifactManifest, payload) = await ReadPortableArtifactAsync(artifact.Path, cancellationToken);
-        var hostGuard = PlanetCrafterWorldTransformer.PrepareForHost(payload, artifactManifest.Players, expectedPlayerName);
+        var hostGuard = PlanetCrafterWorldTransformer.PrepareForHost(payload, artifactManifest.Players, expectedPlayerName, artifactManifest.DisplayName);
         if (!hostGuard.Success)
         {
             return ImportFailed(["L'artefact n'est pas importable pour ce joueur.", .. hostGuard.Errors]);

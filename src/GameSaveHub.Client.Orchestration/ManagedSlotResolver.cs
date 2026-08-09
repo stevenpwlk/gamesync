@@ -5,7 +5,7 @@ namespace GameSaveHub.Client.Orchestration;
 
 public static class ManagedSlotResolver
 {
-    private const string DesiredDisplayName = "GSH-MONDE-PARTAGE";
+    public const string PermanentDisplayName = "GSH-MONDE-PARTAGE";
     private const string LegacyDisplayName = "GSH-SHLAGS-RETURN";
 
     public static ManagedSlotResolution Resolve(
@@ -34,13 +34,13 @@ public static class ManagedSlotResolver
             return ResolveCandidate(
                 boundWorlds[0],
                 playerName,
-                boundWorlds[0].DisplayName.Equals(DesiredDisplayName, StringComparison.Ordinal)
+                boundWorlds[0].DisplayName.Equals(PermanentDisplayName, StringComparison.Ordinal)
                     ? ManagedSlotStatus.Ready
                     : ManagedSlotStatus.RenamePending);
         }
 
         var desiredWorlds = inspection.Worlds
-            .Where(world => world.DisplayName.Equals(DesiredDisplayName, StringComparison.Ordinal))
+            .Where(world => world.DisplayName.Equals(PermanentDisplayName, StringComparison.Ordinal))
             .ToArray();
         if (desiredWorlds.Length == 1)
             return ResolveCandidate(desiredWorlds[0], playerName, ManagedSlotStatus.UnboundCandidate);

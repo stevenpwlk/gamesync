@@ -166,7 +166,7 @@ public sealed class SaveExporterServiceTests : IDisposable
         public Task<InstallationDetection> DetectInstallationAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<SnapshotResult> CreateSafetySnapshotAsync(string outputRoot, string? acknowledgedTestWorldName, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<PortableSaveArtifact> ExportPortableArtifactAsync(string worldName, string outputRoot, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<HostPreparation> PrepareForHostAsync(PortableSaveArtifact artifact, string playerName, string outputRoot, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<HostPreparation> PrepareForHostAsync(PortableSaveArtifact artifact, string playerName, string targetDisplayName, string outputRoot, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<ImportBaselineResult> CreateImportBaselineAsync(string outputRoot, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<ImportTargetProbeResult> ProbeImportTargetAsync(string baselineDirectory, string expectedPlaceholderName, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<ImportReconciliationResult> ReconcilePortableImportAsync(PortableSaveArtifact artifact, string baselineDirectory, string expectedPlayerName, string targetLogicalName, string placeholderPayloadSha256, CancellationToken cancellationToken = default) => throw new NotSupportedException();

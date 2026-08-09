@@ -117,6 +117,7 @@ public enum HostPreparationOutcome
     AlreadyHost,
     PlayerNotFound,
     PlayerAmbiguous,
+    InvalidDisplayName,
     InvalidArtifact,
     InvalidPlayerTopology,
     Failed

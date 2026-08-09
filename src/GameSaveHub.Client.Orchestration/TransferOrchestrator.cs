@@ -277,13 +277,19 @@ public sealed class TransferOrchestrator(
                 if (session.PreparedArtifactPath is null || !File.Exists(session.PreparedArtifactPath))
                 {
                     var preparedRoot = Path.Combine(store.GetSessionDirectory(session.LocalSessionId), "prepared");
-                    var preparation = await adapter.PrepareForHostAsync(source, session.PlayerName, preparedRoot, cancellationToken);
+                    var preparation = await adapter.PrepareForHostAsync(
+                        source,
+                        session.PlayerName,
+                        ManagedSlotResolver.PermanentDisplayName,
+                        preparedRoot,
+                        cancellationToken);
                     if (!preparation.Success || preparation.PreparedArtifact is null)
                     {
                         var code = preparation.Outcome switch
                         {
                             HostPreparationOutcome.PlayerNotFound => "player_not_found",
                             HostPreparationOutcome.PlayerAmbiguous => "player_ambiguous",
+                            HostPreparationOutcome.InvalidDisplayName => "invalid_target_display_name",
                             HostPreparationOutcome.InvalidPlayerTopology => "player_topology_invalid",
                             HostPreparationOutcome.InvalidArtifact => "artifact_invalid",
                             _ => "host_preparation_failed"

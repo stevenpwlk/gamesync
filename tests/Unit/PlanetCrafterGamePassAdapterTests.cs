@@ -357,12 +357,61 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         var adapter = CreateAdapter();
         var artifact = await adapter.ExportPortableArtifactAsync("Shlags1", Path.Combine(_root, "artifacts"));
 
-        var result = await adapter.PrepareForHostAsync(artifact, "UnknownPlayer", Path.Combine(_root, "prepared"));
+        var result = await adapter.PrepareForHostAsync(artifact, "UnknownPlayer", "Shlags1", Path.Combine(_root, "prepared"));
 
         Assert.False(result.Success);
         Assert.Equal(HostPreparationOutcome.PlayerNotFound, result.Outcome);
         Assert.Null(result.PreparedArtifact);
         Assert.Contains(result.Errors, error => error.Contains("n'existe pas", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PrepareForHostSetsPermanentDisplayNameInPayloadAndManifest()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-1.json", "Shlags1", players:
+        [
+            new TestPlayer(0, "Stevenpwlk", true, 3, 4, "1,2,3"),
+            new TestPlayer(7, "BoB XiMe", false, 5, 6, "7,8,9")
+        ]);
+        var adapter = CreateAdapter();
+        var artifact = await adapter.ExportPortableArtifactAsync("Shlags1", Path.Combine(_root, "artifacts"));
+
+        var prepared = await adapter.PrepareForHostAsync(
+            artifact,
+            "Stevenpwlk",
+            "GSH-MONDE-PARTAGE",
+            Path.Combine(_root, "prepared"));
+
+        Assert.True(prepared.Success, string.Join(Environment.NewLine, prepared.Errors));
+        Assert.Equal("GSH-MONDE-PARTAGE", prepared.PreparedArtifact!.Manifest!.DisplayName);
+        Assert.True((await adapter.ValidateArtifactAsync(prepared.PreparedArtifact)).IsValid);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("bad\rname")]
+    [InlineData("bad\nname")]
+    public async Task PrepareForHostRejectsUnsafeDisplayName(string name)
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-1.json", "Shlags1", players:
+        [
+            new TestPlayer(0, "Stevenpwlk", true, 3, 4, "1,2,3")
+        ]);
+        var adapter = CreateAdapter();
+        var artifact = await adapter.ExportPortableArtifactAsync("Shlags1", Path.Combine(_root, "artifacts"));
+
+        var prepared = await adapter.PrepareForHostAsync(
+            artifact,
+            "Stevenpwlk",
+            name,
+            Path.Combine(_root, "prepared"));
+
+        Assert.False(prepared.Success);
+        Assert.Equal(HostPreparationOutcome.InvalidDisplayName, prepared.Outcome);
+        Assert.Contains("invalid_target_display_name", prepared.Errors);
+        Assert.Null(prepared.PreparedArtifact);
     }
 
     [Fact]
@@ -377,7 +426,7 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         var adapter = CreateAdapter();
         var artifact = await adapter.ExportPortableArtifactAsync("Shlags1", Path.Combine(_root, "artifacts"));
 
-        var result = await adapter.PrepareForHostAsync(artifact, "ALEX", Path.Combine(_root, "prepared"));
+        var result = await adapter.PrepareForHostAsync(artifact, "ALEX", "Shlags1", Path.Combine(_root, "prepared"));
 
         Assert.False(result.Success);
         Assert.Equal(HostPreparationOutcome.PlayerAmbiguous, result.Outcome);
@@ -396,7 +445,7 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         var adapter = CreateAdapter();
         var artifact = await adapter.ExportPortableArtifactAsync("Shlags1", Path.Combine(_root, "artifacts"));
 
-        var result = await adapter.PrepareForHostAsync(artifact, "bob xime", Path.Combine(_root, "prepared"));
+        var result = await adapter.PrepareForHostAsync(artifact, "bob xime", "Shlags1", Path.Combine(_root, "prepared"));
 
         Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
         Assert.Equal(HostPreparationOutcome.Prepared, result.Outcome);
@@ -426,7 +475,7 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         var adapter = CreateAdapter();
         var artifact = await adapter.ExportPortableArtifactAsync("Shlags1", Path.Combine(_root, "artifacts"));
 
-        var result = await adapter.PrepareForHostAsync(artifact, "Stevenpwlk", Path.Combine(_root, "prepared"));
+        var result = await adapter.PrepareForHostAsync(artifact, "Stevenpwlk", "Shlags1", Path.Combine(_root, "prepared"));
 
         Assert.True(result.Success);
         Assert.Equal(HostPreparationOutcome.AlreadyHost, result.Outcome);
@@ -447,7 +496,7 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         var adapter = CreateAdapter();
         var artifact = await adapter.ExportPortableArtifactAsync("Shlags1", Path.Combine(_root, "artifacts"));
 
-        var result = await adapter.PrepareForHostAsync(artifact, "BoB XiMe", Path.Combine(_root, "prepared"));
+        var result = await adapter.PrepareForHostAsync(artifact, "BoB XiMe", "Shlags1", Path.Combine(_root, "prepared"));
 
         Assert.False(result.Success);
         Assert.Equal(HostPreparationOutcome.InvalidPlayerTopology, result.Outcome);
