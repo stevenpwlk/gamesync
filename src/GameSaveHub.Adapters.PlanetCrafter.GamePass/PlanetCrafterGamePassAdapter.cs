@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text.Json;
+using System.Xml.Linq;
 using GameSaveHub.Adapters.Abstractions;
 using GameSaveHub.Contracts;
 using GameSaveHub.Core;
@@ -25,7 +26,7 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         CanExportPortableArtifact: true,
         CanPrepareForHost: true,
         CanImportPortableArtifact: true,
-        CanLaunchGame: false,
+        CanLaunchGame: true,
         GateStatus: "pilot-validated-production-gate-required");
 
     public Task<InstallationDetection> DetectInstallationAsync(CancellationToken cancellationToken = default)
@@ -1004,7 +1005,76 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         }
     }
 
-    public Task<GameLaunch> LaunchGameAsync(CancellationToken cancellationToken = default) => NotValidated<GameLaunch>();
+    public async Task<GameLaunch> LaunchGameAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var packageFamily = _options.InstalledPackageFamilyProbe?.Invoke();
+        var applicationId = _options.InstalledApplicationIdProbe?.Invoke();
+        if (_options.InstalledPackageFamilyProbe is null)
+        {
+            var registration = FindAppxRegistration();
+            var registered = registration.PackageFullName is not null;
+            var packageRootExists = Directory.Exists(GetPackageRoot());
+            packageFamily = registered || packageRootExists ? _options.PackageFamilyName : null;
+            applicationId ??= FindInstalledApplicationId(registration.InstallLocation);
+        }
+
+        if (string.IsNullOrWhiteSpace(packageFamily))
+        {
+            return new GameLaunch(
+                false,
+                null,
+                ["The Planet Crafter n'est pas installé depuis l'application Xbox pour ce compte Windows."]);
+        }
+
+        if (string.IsNullOrWhiteSpace(applicationId))
+        {
+            return new GameLaunch(
+                false,
+                null,
+                ["L'application Xbox de The Planet Crafter n'a pas pu être identifiée dans son manifeste installé."]);
+        }
+
+        var aumid = $"{packageFamily.Trim()}!{applicationId.Trim()}";
+        try
+        {
+            (_options.AppActivator ?? ActivateXboxApplication)(aumid);
+            var attempts = Math.Max(1, _options.LaunchVerificationAttempts);
+            for (var attempt = 0; attempt < attempts; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var processes = ProbeProcesses();
+                if (processes.Count > 0)
+                    return new GameLaunch(true, processes[0].Id, []);
+                if (attempt + 1 < attempts && _options.LaunchVerificationInterval > TimeSpan.Zero)
+                    await Task.Delay(_options.LaunchVerificationInterval, cancellationToken);
+            }
+            return new GameLaunch(
+                false,
+                null,
+                ["Xbox a accepté la demande, mais The Planet Crafter n'a pas démarré. Ouvrez l'application Xbox pour réessayer."]);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return new GameLaunch(
+                false,
+                null,
+                [$"Impossible de lancer le jeu depuis Xbox : {exception.Message}"]);
+        }
+    }
+
+    private static int? ActivateXboxApplication(string aumid)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new InvalidOperationException("Le lancement Xbox nécessite Windows.");
+
+        var process = Process.Start(new ProcessStartInfo
+        {
+            FileName = $"shell:AppsFolder\\{aumid}",
+            UseShellExecute = true
+        });
+        return process?.Id;
+    }
 
     public async Task<SaveStability> WaitForSaveStabilityAsync(
         TimeSpan observationWindow,
@@ -1073,6 +1143,26 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         var segments = packageId.Split('_');
         var version = segments.Length > 1 ? segments[1] : null;
         return (packageId, version, installLocation);
+    }
+
+    private static string? FindInstalledApplicationId(string? installLocation)
+    {
+        if (string.IsNullOrWhiteSpace(installLocation)) return null;
+        var manifestPath = Path.Combine(installLocation, "AppxManifest.xml");
+        if (!File.Exists(manifestPath)) return null;
+
+        try
+        {
+            return XDocument.Load(manifestPath)
+                .Descendants()
+                .Where(element => element.Name.LocalName.Equals("Application", StringComparison.Ordinal))
+                .Select(element => element.Attribute("Id")?.Value)
+                .FirstOrDefault(id => !string.IsNullOrWhiteSpace(id));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+        {
+            return null;
+        }
     }
 
     private IReadOnlyList<(int Id, string Name)> ProbeProcesses()

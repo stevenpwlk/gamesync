@@ -297,7 +297,7 @@ public sealed class TransferOrchestratorTests : IDisposable
         public Task<WorldStatusResponse> GetWorldStatusAsync(Guid worldId, CancellationToken cancellationToken = default) =>
             Task.FromResult(new WorldStatusResponse(worldId, "Shlags1", "Available", Guid.NewGuid(), null));
 
-        public Task<AcquireWorldResponse> AcquireWorldAsync(Guid worldId, Guid? expectedVersionId, string idempotencyKey, CancellationToken cancellationToken = default)
+        public Task<AcquireWorldResponse> AcquireWorldAsync(Guid worldId, Guid? expectedVersionId, string playerName, string idempotencyKey, CancellationToken cancellationToken = default)
         {
             AcquireCalls++;
             return Task.FromResult(new AcquireWorldResponse(Guid.NewGuid(), expectedVersionId, "Preparing"));

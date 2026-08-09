@@ -158,10 +158,10 @@ function Test-Phase3Guards {
 
     $migrations = Get-ChildItem -LiteralPath (Join-Path $repo 'src\GameSaveHub.Server.Infrastructure\Migrations') -Filter '*.cs' -File |
         Where-Object { $_.Name -notmatch '\.Designer\.cs$' -and $_.Name -ne 'GameSaveHubDbContextModelSnapshot.cs' }
-    if ($migrations.Count -ne 5) {
-        throw "Nombre de migrations EF inattendu : $($migrations.Count) (5 attendu)."
+    if ($migrations.Count -ne 6) {
+        throw "Nombre de migrations EF inattendu : $($migrations.Count) (6 attendu)."
     }
-    Write-Host 'Base SQLite : migration PublishedByPlayerName presente'
+    Write-Host 'Base SQLite : migrations PublishedByPlayerName et Session.PlayerName presentes'
 
     foreach ($bad in @('DangerousAcceptAnyServerCertificateValidator', 'ServerCertificateCustomValidationCallback')) {
         if ($httpClient -match $bad) { throw "Bypass TLS interdit detecte : $bad" }
@@ -189,36 +189,24 @@ function Test-Phase3Guards {
     if ($clientMainWindow -match 'GetInt64\(\)\.ToString\(\)' -or $clientMainWindow -match 'GetInt32\(\)\.ToString\(\)') {
         throw 'CA1305 : valeur numerique formatee sans culture explicite dans MainWindow.'
     }
-    if ($clientMainWindow -notmatch 'CultureInfo\.InvariantCulture') {
-        throw 'Formatage invariant absent dans MainWindow.'
-    }
-
-    # Regression constatee en Phase 3 : l'IHM ne cablait plus qu'une des six commandes de
-    # transfert, rendant impossible d'aller au bout d'un import. Le presentateur porte
-    # desormais ces commandes et l'ecran doit s'appuyer sur lui.
-    $presenterPath = Join-Path $repo 'src\GameSaveHub.Client.Orchestration\TransferWizardPresenter.cs'
+    # L'accueil contextuel remplace l'ancien assistant technique. Les transitions fines
+    # restent dans l'orchestrateur et le worker, jamais dans la vue WPF.
+    $presenterPath = Join-Path $repo 'src\GameSaveHub.Client.Orchestration\HomeStatePresenter.cs'
     if (-not (Test-Path -LiteralPath $presenterPath)) {
-        throw 'TransferWizardPresenter absent : l assistant de transfert ne peut pas etre rendu.'
+        throw 'HomeStatePresenter absent : l accueil contextuel ne peut pas etre rendu.'
     }
     $presenter = Get-Content -LiteralPath $presenterPath -Raw
-    foreach ($command in @(
-        'transfer-start',
-        'transfer-placeholder-ready',
-        'transfer-play-started',
-        'transfer-play-complete',
-        'transfer-resume',
-        'transfer-abort')) {
-        if ($presenter -notmatch [regex]::Escape($command)) {
-            throw "Commande de transfert absente de l assistant : $command"
+    foreach ($state in @('Ready', 'Placeholder', 'ReadyToPlay', 'RemoteHosting', 'ManualReview')) {
+        if ($presenter -notmatch [regex]::Escape($state)) {
+            throw "Etat contextuel absent du presentateur : $state"
         }
     }
-    if ($clientMainWindow -notmatch 'TransferWizardPresenter') {
-        throw 'MainWindow n utilise pas TransferWizardPresenter : les etapes de transfert ne seraient pas pilotables.'
+    if ($clientMainWindow -notmatch 'HomeStatePresenter') {
+        throw 'MainWindow n utilise pas HomeStatePresenter.'
     }
 
-    # Une exception non geree dans un gestionnaire async void fermait l application sans message.
-    if ($clientMainWindow -notmatch 'GuardAsync') {
-        throw 'Gestionnaires IHM sans enveloppe de gestion d erreur.'
+    if ($clientMainWindow -notmatch 'RefreshAsync' -or $clientMainWindow -notmatch 'catch \(Exception') {
+        throw 'Rafraichissement IHM sans enveloppe de gestion d erreur.'
     }
     $appXaml = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.App\App.xaml') -Raw
     if ($appXaml -notmatch 'DispatcherUnhandledException') {
@@ -356,6 +344,6 @@ Write-Host "SHA-256           : $apiHash"
 
 Write-Host "`nVALIDATION PHASE 3 TERMINEE" -ForegroundColor Green
 Write-Host 'Attendu : 0 echec, au moins 120 cas de test executes.'
-Write-Host 'Attendu : canPrepareForHost=true, canImportPortableArtifact=true, canLaunchGame=false.'
+Write-Host 'Attendu : canPrepareForHost=true, canImportPortableArtifact=true, canLaunchGame=true.'
 Write-Host 'IMPORTANT : FeatureGates__AllowHostTransfer=false ET EnableWgsTransfer=false.'
 Write-Host 'Ce build ne contacte pas le NAS et n ecrit pas dans WGS.'

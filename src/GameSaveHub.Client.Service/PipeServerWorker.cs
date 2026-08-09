@@ -16,6 +16,7 @@ public sealed partial class PipeServerWorker(
     ServerEnrollmentClient enrollmentClient,
     ITransferServerClient serverClient,
     TransferOrchestrator orchestrator,
+    TransferTransitionGate transitionGate,
     ITransferSessionStore sessionStore,
     IGameSaveAdapter adapter,
     ILogger<PipeServerWorker> logger) : BackgroundService
@@ -96,6 +97,7 @@ public sealed partial class PipeServerWorker(
                 {
                     Healthy = await enrollmentClient.IsServerHealthyAsync(cancellationToken)
                 }),
+                "home-context" => await BuildHomeContextAsync(cancellationToken),
                 "enroll" when !string.IsNullOrWhiteSpace(request.EnrollmentCode) &&
                               !string.IsNullOrWhiteSpace(request.DeviceName) &&
                               !string.IsNullOrWhiteSpace(request.PlayerName) =>
@@ -126,17 +128,29 @@ public sealed partial class PipeServerWorker(
                 "transfer-active" => await GetTransferScreenAsync(cancellationToken),
                 "diagnostic-report" => await BuildDiagnosticReportAsync(cancellationToken),
                 "transfer-start" when request.WorldId is Guid worldId =>
-                    await StartTransferAsync(worldId, request.PlayerName, cancellationToken),
+                    await transitionGate.RunAsync(
+                        () => StartTransferAsync(worldId, request.PlayerName, cancellationToken),
+                        cancellationToken),
                 "transfer-placeholder-ready" when request.TransferSessionId is Guid placeholderSessionId =>
-                    ToPipe(await orchestrator.ConfirmPlaceholderReadyAsync(placeholderSessionId, cancellationToken)),
+                    ToPipe(await transitionGate.RunAsync(
+                        () => orchestrator.ConfirmPlaceholderReadyAsync(placeholderSessionId, cancellationToken),
+                        cancellationToken)),
                 "transfer-play-started" when request.TransferSessionId is Guid playSessionId =>
-                    ToPipe(await orchestrator.MarkPlayStartedAsync(playSessionId, cancellationToken)),
+                    ToPipe(await transitionGate.RunAsync(
+                        () => orchestrator.MarkPlayStartedAsync(playSessionId, cancellationToken),
+                        cancellationToken)),
                 "transfer-play-complete" when request.TransferSessionId is Guid completeSessionId =>
-                    ToPipe(await orchestrator.CompletePlayAsync(completeSessionId, cancellationToken)),
+                    ToPipe(await transitionGate.RunAsync(
+                        () => orchestrator.CompletePlayAsync(completeSessionId, cancellationToken),
+                        cancellationToken)),
                 "transfer-resume" when request.TransferSessionId is Guid resumeSessionId =>
-                    ToPipe(await orchestrator.ResumeAsync(resumeSessionId, cancellationToken)),
+                    ToPipe(await transitionGate.RunAsync(
+                        () => orchestrator.ResumeAsync(resumeSessionId, cancellationToken),
+                        cancellationToken)),
                 "transfer-abort" when request.TransferSessionId is Guid abortSessionId =>
-                    ToPipe(await orchestrator.AbortAsync(abortSessionId, cancellationToken)),
+                    ToPipe(await transitionGate.RunAsync(
+                        () => orchestrator.AbortAsync(abortSessionId, cancellationToken),
+                        cancellationToken)),
                 _ => new PipeResponse(false, "command_unknown", "Commande locale inconnue ou incomplète.")
             };
         }
@@ -146,8 +160,81 @@ public sealed partial class PipeServerWorker(
         }
         catch (Exception exception) when (exception is HttpRequestException or InvalidOperationException or IOException or UnauthorizedAccessException)
         {
-            return new PipeResponse(false, "operation_failed", exception.Message);
+            LogOperationFailure(logger, request.Command, exception);
+            return new PipeResponse(false, "operation_failed", "L'opération n'a pas pu aboutir. Les détails sont disponibles dans le diagnostic.");
         }
+    }
+
+    private async Task<PipeResponse> BuildHomeContextAsync(CancellationToken cancellationToken)
+    {
+        var state = await stateStore.ReadAsync(cancellationToken);
+        var sessions = await orchestrator.GetAllSessionsAsync(cancellationToken);
+        var active = sessions.Where(item => TransferStageRules.HoldsLocalLock(item.Stage)).ToArray();
+        var lastFinished = sessions
+            .Where(item => TransferStageRules.IsTerminal(item.Stage))
+            .OrderByDescending(item => item.UpdatedAtUtc)
+            .FirstOrDefault();
+
+        var serverHealthy = await enrollmentClient.IsServerHealthyAsync(cancellationToken);
+        WorldCatalogItemResponse? primaryWorld = null;
+        WorldStatusResponse? worldStatus = null;
+        string? safetyStopCode = active.Length > 1 ? "multiple_local_sessions" : null;
+
+        if (serverHealthy && state.DeviceId is not null)
+        {
+            var selection = PrimaryWorldSelector.Select(await serverClient.ListWorldsAsync(cancellationToken));
+            if (selection.Success)
+            {
+                primaryWorld = selection.World;
+                worldStatus = await serverClient.GetWorldStatusAsync(primaryWorld!.WorldId, cancellationToken);
+            }
+            else
+            {
+                safetyStopCode = selection.Code;
+            }
+        }
+
+        var activeLocal = active.Length == 1 ? active[0] : null;
+        if (safetyStopCode is null && state.DeviceId is Guid localDeviceId)
+        {
+            safetyStopCode = HomeContextConsistency.Validate(localDeviceId, worldStatus, activeLocal);
+            if (safetyStopCode is null && activeLocal is not null && primaryWorld is not null &&
+                activeLocal.WorldId != primaryWorld.WorldId)
+            {
+                safetyStopCode = "local_world_mismatch";
+            }
+        }
+
+        var process = await adapter.DetectGameProcessAsync(cancellationToken);
+        var installation = await adapter.DetectInstallationAsync(cancellationToken);
+        var wgsAvailable = installation.WgsRoot is not null;
+        var wgsStable = false;
+        if (wgsAvailable && state.DeviceId is not null && active.Length == 0 && !process.IsRunning)
+        {
+            try
+            {
+                wgsStable = (await adapter.InspectLocalStorageAsync(cancellationToken)).Stable;
+            }
+            catch (InvalidOperationException)
+            {
+                // L'accueil et l'onboarding restent disponibles si WGS n'existe pas encore.
+            }
+        }
+        var context = new HomeContextSnapshot(
+            state.DeviceId is not null,
+            state.DeviceId,
+            state.RegisteredPlayerName,
+            serverHealthy,
+            primaryWorld,
+            worldStatus,
+            safetyStopCode,
+            activeLocal,
+            lastFinished,
+            process.IsRunning,
+            wgsStable,
+            wgsAvailable);
+
+        return new PipeResponse(true, "ok", "Contexte d'accueil.", context);
     }
 
     private async Task<PipeResponse> SetPlayerProfileAsync(string playerName, CancellationToken cancellationToken)
@@ -220,6 +307,15 @@ public sealed partial class PipeServerWorker(
 
         var preflight = await RunPreflightAsync(worldId, cancellationToken);
         if (!preflight.Success) return preflight;
+
+        var localStorage = await adapter.InspectLocalStorageAsync(cancellationToken);
+        if (localStorage.GameRunning || !localStorage.Stable)
+        {
+            return new PipeResponse(
+                false,
+                "wgs_not_stable",
+                "La sauvegarde Xbox n'est pas encore stable. Fermez le jeu et patientez quelques instants.");
+        }
 
         var state = await stateStore.ReadAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(state.RegisteredPlayerName))
@@ -458,4 +554,7 @@ public sealed partial class PipeServerWorker(
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Échec du serveur named pipe.")]
     private static partial void LogPipeFailure(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Échec de la commande locale {Command}.")]
+    private static partial void LogOperationFailure(ILogger logger, string command, Exception exception);
 }

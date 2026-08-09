@@ -1,0 +1,153 @@
+using GameSaveHub.Client.Orchestration;
+using GameSaveHub.Contracts;
+
+namespace GameSaveHub.UnitTests;
+
+public sealed class HomeStatePresenterTests
+{
+    public static TheoryData<HomeContextSnapshot, HomeVisualState, HomePrimaryAction> Cases => new()
+    {
+        { Context(enrolled: false), HomeVisualState.Onboarding, HomePrimaryAction.None },
+        { Context(serverHealthy: false), HomeVisualState.Unavailable, HomePrimaryAction.None },
+        { Context(safetyStopCode: "multiple_primary_worlds"), HomeVisualState.SafetyStop, HomePrimaryAction.OpenDiagnostics },
+        { Context(wgsStable: false), HomeVisualState.SafetyStop, HomePrimaryAction.None },
+        { Context(wgsAvailable: false), HomeVisualState.ReadyToPlay, HomePrimaryAction.LaunchGame },
+        { Context(gameRunning: true), HomeVisualState.OffHub, HomePrimaryAction.None },
+        { Context(), HomeVisualState.Ready, HomePrimaryAction.StartTransfer },
+        { Context(localStage: TransferStage.Acquiring), HomeVisualState.Preparing, HomePrimaryAction.None },
+        { Context(localStage: TransferStage.AwaitingPlaceholder), HomeVisualState.Placeholder, HomePrimaryAction.LaunchGame },
+        { Context(localStage: TransferStage.ReadyToPlay), HomeVisualState.ReadyToPlay, HomePrimaryAction.LaunchGame },
+        { Context(localStage: TransferStage.InGame, gameRunning: true), HomeVisualState.Hosting, HomePrimaryAction.None },
+        { Context(localStage: TransferStage.CapturingResult), HomeVisualState.Securing, HomePrimaryAction.None },
+        { Context(localStage: TransferStage.Interrupted), HomeVisualState.Interrupted, HomePrimaryAction.ResumeTransfer },
+        { Context(localStage: TransferStage.ManualReview), HomeVisualState.ManualReview, HomePrimaryAction.OpenDiagnostics },
+        { Context(remoteState: "Preparing", remotePlayer: "Bob"), HomeVisualState.RemotePreparing, HomePrimaryAction.None },
+        { Context(remoteState: "InGame", remotePlayer: "Bob"), HomeVisualState.RemoteHosting, HomePrimaryAction.LaunchGame },
+        { Context(remoteState: "InGame", remotePlayer: "Bob", gameRunning: true), HomeVisualState.RemoteHosting, HomePrimaryAction.None }
+    };
+
+    [Theory]
+    [MemberData(nameof(Cases))]
+    public void ProducesExpectedStateAndSinglePrimaryAction(
+        HomeContextSnapshot context,
+        HomeVisualState expectedState,
+        HomePrimaryAction expectedAction)
+    {
+        var view = HomeStatePresenter.Present(context);
+
+        Assert.Equal(expectedState, view.State);
+        Assert.Equal(expectedAction, view.PrimaryAction);
+        Assert.False(string.IsNullOrWhiteSpace(view.Title));
+        Assert.False(string.IsNullOrWhiteSpace(view.Instruction));
+        Assert.Equal(expectedAction != HomePrimaryAction.None, !string.IsNullOrWhiteSpace(view.PrimaryActionLabel));
+    }
+
+    [Fact]
+    public void NamesRemoteHostWithoutExposingDeviceIdentity()
+    {
+        var view = HomeStatePresenter.Present(Context(remoteState: "InGame", remotePlayer: "Bob"));
+
+        Assert.Contains("Bob", view.Title, StringComparison.Ordinal);
+        Assert.DoesNotContain("PC", view.Title, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void UsesNeutralWordingForLegacyRemoteSessionWithoutPlayerName()
+    {
+        var view = HomeStatePresenter.Present(Context(remoteState: "InGame", remotePlayer: null));
+
+        Assert.Contains("Un autre joueur", view.Title, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DoesNotExposeTechnicalErrorDetailsOnInterruptedHomeState()
+    {
+        var context = Context(localStage: TransferStage.Interrupted);
+        context = context with
+        {
+            LocalSession = context.LocalSession! with { LastErrorMessage = @"C:\Users\Steven\private-save.json" }
+        };
+
+        var view = HomeStatePresenter.Present(context);
+
+        Assert.DoesNotContain("C:\\Users", view.Instruction, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("diagnostic", view.Instruction, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SelectsOnlyUniqueWorldWithArtifact()
+    {
+        var selected = PrimaryWorldSelector.Select(
+        [
+            new WorldCatalogItemResponse(Guid.NewGuid(), "Vide", "Available", null, false),
+            new WorldCatalogItemResponse(Guid.NewGuid(), "Principal", "Available", Guid.NewGuid(), true)
+        ]);
+
+        Assert.True(selected.Success);
+        Assert.Equal("Principal", selected.World!.Name);
+    }
+
+    [Theory]
+    [InlineData(0, "primary_world_missing")]
+    [InlineData(2, "multiple_primary_worlds")]
+    public void RefusesAmbiguousPrimaryWorld(int artifactCount, string expectedCode)
+    {
+        var worlds = Enumerable.Range(0, artifactCount)
+            .Select(index => new WorldCatalogItemResponse(Guid.NewGuid(), $"Monde {index}", "Available", Guid.NewGuid(), true))
+            .ToArray();
+
+        var selected = PrimaryWorldSelector.Select(worlds);
+
+        Assert.False(selected.Success);
+        Assert.Equal(expectedCode, selected.Code);
+        Assert.Null(selected.World);
+    }
+
+    private static HomeContextSnapshot Context(
+        bool enrolled = true,
+        bool serverHealthy = true,
+        bool gameRunning = false,
+        string? safetyStopCode = null,
+        bool wgsStable = true,
+        bool wgsAvailable = true,
+        TransferStage? localStage = null,
+        string? remoteState = null,
+        string? remotePlayer = null)
+    {
+        var deviceId = Guid.NewGuid();
+        var worldId = Guid.NewGuid();
+        var local = localStage is TransferStage stage
+            ? TransferSession.Create(worldId, "Steven", DateTimeOffset.UtcNow) with { Stage = stage }
+            : null;
+        var remote = remoteState is null
+            ? null
+            : new ActiveWorldSessionResponse(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                remotePlayer,
+                remoteState,
+                DateTimeOffset.UtcNow.AddMinutes(-5),
+                DateTimeOffset.UtcNow);
+        var status = new WorldStatusResponse(
+            worldId,
+            "Monde principal",
+            remoteState ?? "Available",
+            Guid.NewGuid(),
+            remote?.SessionId,
+            remote,
+            null);
+        return new HomeContextSnapshot(
+            enrolled,
+            enrolled ? deviceId : null,
+            enrolled ? "Steven" : null,
+            serverHealthy,
+            new WorldCatalogItemResponse(worldId, "Monde principal", status.Status, status.CurrentVersionId, true),
+            status,
+            safetyStopCode,
+            local,
+            null,
+            gameRunning,
+            wgsStable,
+            wgsAvailable);
+    }
+}

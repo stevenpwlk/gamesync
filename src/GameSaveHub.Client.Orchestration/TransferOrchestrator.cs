@@ -214,7 +214,12 @@ public sealed class TransferOrchestrator(
                 if (session.ServerSessionId is null)
                 {
                     var status = await server.GetWorldStatusAsync(session.WorldId, cancellationToken);
-                    var acquired = await server.AcquireWorldAsync(session.WorldId, status.CurrentVersionId, session.AcquireIdempotencyKey, cancellationToken);
+                    var acquired = await server.AcquireWorldAsync(
+                        session.WorldId,
+                        status.CurrentVersionId,
+                        session.PlayerName,
+                        session.AcquireIdempotencyKey,
+                        cancellationToken);
                     session = await PersistAsync(session with
                     {
                         ServerSessionId = acquired.SessionId,

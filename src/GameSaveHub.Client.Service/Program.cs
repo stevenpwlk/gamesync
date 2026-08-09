@@ -25,8 +25,11 @@ builder.Services.AddSingleton<ITransferSessionStore>(services =>
 builder.Services.AddHttpClient<ServerEnrollmentClient>();
 builder.Services.AddHttpClient<ITransferServerClient, AuthenticatedTransferServerClient>();
 builder.Services.AddSingleton<TransferOrchestrator>();
+builder.Services.AddSingleton<TransferTransitionGate>();
+builder.Services.AddSingleton<GameLifecycleMonitor>();
 builder.Services.AddHostedService<TransferRecoveryWorker>();
 builder.Services.AddHostedService<TransferHeartbeatWorker>();
+builder.Services.AddHostedService<GameLifecycleWorker>();
 builder.Services.AddHostedService<PipeServerWorker>();
 
 await builder.Build().RunAsync();

@@ -64,14 +64,85 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
     }
 
     [Fact]
-    public void ValidatedPilotCapabilitiesExposePreparationAndImportButNotAutomaticLaunch()
+    public void ValidatedPilotCapabilitiesExposePreparationImportAndXboxLaunch()
     {
         var adapter = CreateAdapter();
 
         Assert.True(adapter.Capabilities.CanPrepareForHost);
         Assert.True(adapter.Capabilities.CanImportPortableArtifact);
-        Assert.False(adapter.Capabilities.CanLaunchGame);
+        Assert.True(adapter.Capabilities.CanLaunchGame);
         Assert.Contains("production-gate", adapter.Capabilities.GateStatus, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LaunchUsesInstalledXboxApplicationAumid()
+    {
+        string? activated = null;
+        var adapter = new PlanetCrafterGamePassAdapter(new PlanetCrafterGamePassOptions
+        {
+            InstalledPackageFamilyProbe = () => PlanetCrafterGamePassOptions.DefaultPackageFamilyName,
+            InstalledApplicationIdProbe = () => "Game",
+            AppActivator = aumid => { activated = aumid; return null; },
+            ProcessProbe = () => [(42, "Planet Crafter")],
+            LaunchVerificationAttempts = 1,
+            LaunchVerificationInterval = TimeSpan.Zero
+        });
+
+        var result = await adapter.LaunchGameAsync();
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+        Assert.Equal(42, result.ProcessId);
+        Assert.Equal($"{PlanetCrafterGamePassOptions.DefaultPackageFamilyName}!Game", activated);
+    }
+
+    [Fact]
+    public async Task LaunchRefusesWhenXboxPackageIsAbsent()
+    {
+        var adapter = new PlanetCrafterGamePassAdapter(new PlanetCrafterGamePassOptions
+        {
+            InstalledPackageFamilyProbe = () => null,
+            AppActivator = _ => throw new InvalidOperationException("must not activate")
+        });
+
+        var result = await adapter.LaunchGameAsync();
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error => error.Contains("Xbox", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LaunchReportsActivationRefusalWithoutThrowing()
+    {
+        var adapter = new PlanetCrafterGamePassAdapter(new PlanetCrafterGamePassOptions
+        {
+            InstalledPackageFamilyProbe = () => PlanetCrafterGamePassOptions.DefaultPackageFamilyName,
+            InstalledApplicationIdProbe = () => "Game",
+            AppActivator = _ => throw new InvalidOperationException("activation refusée")
+        });
+
+        var result = await adapter.LaunchGameAsync();
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error => error.Contains("Xbox", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LaunchRefusesSuccessWhenGameProcessNeverAppears()
+    {
+        var adapter = new PlanetCrafterGamePassAdapter(new PlanetCrafterGamePassOptions
+        {
+            InstalledPackageFamilyProbe = () => PlanetCrafterGamePassOptions.DefaultPackageFamilyName,
+            InstalledApplicationIdProbe = () => "Game",
+            AppActivator = _ => null,
+            ProcessProbe = () => [],
+            LaunchVerificationAttempts = 1,
+            LaunchVerificationInterval = TimeSpan.Zero
+        });
+
+        var result = await adapter.LaunchGameAsync();
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error => error.Contains("pas démarré", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

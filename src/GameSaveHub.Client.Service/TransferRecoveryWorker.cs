@@ -4,13 +4,16 @@ namespace GameSaveHub.Client.Service;
 
 public sealed partial class TransferRecoveryWorker(
     TransferOrchestrator orchestrator,
+    TransferTransitionGate transitionGate,
     ILogger<TransferRecoveryWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
         {
-            var results = await orchestrator.RecoverAllAsync(stoppingToken);
+            var results = await transitionGate.RunAsync(
+                () => orchestrator.RecoverAllAsync(stoppingToken),
+                stoppingToken);
             foreach (var result in results)
             {
                 LogRecovery(logger, result.Session?.LocalSessionId, result.Code, result.Message);
