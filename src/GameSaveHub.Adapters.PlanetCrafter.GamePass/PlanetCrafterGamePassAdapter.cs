@@ -934,10 +934,10 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 await using var targetLock = new FileStream(
                     targetBlob,
                     FileMode.Open,
-                    FileAccess.ReadWrite,
-                    FileShare.None,
+                    FileAccess.Read,
+                    FileShare.Read | FileShare.Delete,
                     128 * 1024,
-                    FileOptions.Asynchronous | FileOptions.WriteThrough);
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
                 var compareHash = await ComputeSha256FromLockedStreamAsync(targetLock, cancellationToken);
                 if (!compareHash.Equals(baseline.Target.BeforePayloadSha256, StringComparison.OrdinalIgnoreCase))
                 {
@@ -959,15 +959,11 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                     throw new IOException("Le jeu a été lancé juste avant la mutation du slot permanent.");
                 }
 
+                cancellationToken.ThrowIfCancellationRequested();
                 writePerformed = true;
-                targetLock.Position = 0;
-                targetLock.SetLength(0);
-                await targetLock.WriteAsync(payload, cancellationToken);
-                await targetLock.FlushAsync(cancellationToken);
-                targetLock.Flush(flushToDisk: true);
-                finalHash = await ComputeSha256FromLockedStreamAsync(targetLock, cancellationToken);
+                ActivateStagedFileAtomically(temporary, targetBlob);
+                finalHash = await FileSafety.ComputeSha256Async(targetBlob, cancellationToken);
             }
-            File.Delete(temporary);
             if (!finalHash.Equals(importedHash, StringComparison.OrdinalIgnoreCase))
             {
                 throw new IOException("Le hash après remplacement ne correspond pas au payload préparé.");
@@ -2088,10 +2084,9 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 continue;
             }
 
-            var currentName = new Guid(metadata.AsSpan(offset + 144, 16)).ToString("N").ToUpperInvariant();
-            var currentPath = Path.Combine(Path.GetDirectoryName(metadataPath)!, currentName);
-            if (!Path.GetFullPath(currentPath).Equals(Path.GetFullPath(expectedBlob), StringComparison.OrdinalIgnoreCase) ||
-                !File.Exists(currentPath))
+            var resolvedPath = ResolveCurrentBlobPath(metadataPath, metadata, offset);
+            if (!Path.GetFullPath(resolvedPath).Equals(Path.GetFullPath(expectedBlob), StringComparison.OrdinalIgnoreCase) ||
+                !File.Exists(resolvedPath))
             {
                 return false;
             }
@@ -2119,6 +2114,11 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         var hash = await System.Security.Cryptography.SHA256.HashDataAsync(stream, cancellationToken);
         stream.Position = 0;
         return Convert.ToHexStringLower(hash);
+    }
+
+    private static void ActivateStagedFileAtomically(string stagingPath, string targetPath)
+    {
+        File.Replace(stagingPath, targetPath, destinationBackupFileName: null, ignoreMetadataErrors: false);
     }
 
     private static bool PlayersEquivalent(IReadOnlyList<DiscoveredPlayer> left, IReadOnlyList<DiscoveredPlayer> right) =>

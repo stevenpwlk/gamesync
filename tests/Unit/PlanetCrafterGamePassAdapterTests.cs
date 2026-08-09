@@ -1020,6 +1020,114 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
     }
 
     [Fact]
+    public async Task ReplaceManagedSlotAtomicallyActivatesStagingWithoutRewritingOpenOldGeneration()
+    {
+        var wgs = CreateWgs();
+        var targetBlob = CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        CreateWorldFixture(wgs, "Standard-2.json", "ProtectedWorld");
+        var adapter = CreateAdapter();
+        var artifact = await PrepareManagedSlotArtifactAsync(adapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-atomic-activation");
+        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
+        var baseline = await adapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
+        var oldGenerationHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob)));
+        var preparedPayloadHash = await ReadArtifactPayloadHashAsync(artifact.Path);
+        await using var openOldGeneration = new FileStream(
+            targetBlob,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            128 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+        var result = await adapter.ReplaceManagedSlotAsync(
+            artifact,
+            baseline.BaselineDirectory!,
+            slot,
+            "Tester",
+            Path.Combine(_root, "pre-import"));
+
+        openOldGeneration.Position = 0;
+        var stillOpenGenerationHash = Convert.ToHexStringLower(
+            await System.Security.Cryptography.SHA256.HashDataAsync(openOldGeneration));
+        var activatedPathHash = Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob)));
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+        Assert.Equal(oldGenerationHash, stillOpenGenerationHash);
+        Assert.Equal(preparedPayloadHash, activatedPathHash);
+        Assert.NotEqual(stillOpenGenerationHash, activatedPathHash);
+        Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(targetBlob)!, ".gsh-managed-import-*.tmp"));
+    }
+
+    [Fact]
+    public async Task ReplaceManagedSlotCancellationAtFinalProbeLeavesOldGenerationIntactWithoutRollback()
+    {
+        var wgs = CreateWgs();
+        var targetBlob = CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        var setupAdapter = CreateAdapter();
+        var artifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-pre-activation-cancel");
+        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
+        var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
+        var oldGenerationHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob)));
+        var backupRoot = Path.Combine(_root, "pre-import");
+        using var cancellation = new CancellationTokenSource();
+        var probeCount = 0;
+        var adapter = CreateAdapter(() =>
+        {
+            probeCount++;
+            if (probeCount == 8)
+            {
+                Directory.Delete(
+                    Path.Combine(Directory.EnumerateDirectories(backupRoot).Single(), "wgs"),
+                    recursive: true);
+                cancellation.Cancel();
+            }
+            return [];
+        });
+
+        var result = await adapter.ReplaceManagedSlotAsync(
+            artifact,
+            baseline.BaselineDirectory!,
+            slot,
+            "Tester",
+            backupRoot,
+            cancellation.Token);
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error => error.Contains("annul", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Errors, error => error.Contains("rollback", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(
+            oldGenerationHash,
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob))));
+    }
+
+    [Fact]
+    public async Task ReplaceManagedSlotUsesStableGenerationWhenCurrentBlobIsMissing()
+    {
+        var wgs = CreateWgs();
+        var stableBlob = CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        PointFixtureCurrentBlobToMissingGeneration(Path.Combine(Path.GetDirectoryName(stableBlob)!, "container.1"));
+        var adapter = CreateAdapter();
+        var artifact = await PrepareManagedSlotArtifactAsync(adapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-stable-fallback");
+        var preparedPayloadHash = await ReadArtifactPayloadHashAsync(artifact.Path);
+        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
+        var baseline = await adapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
+
+        var result = await adapter.ReplaceManagedSlotAsync(
+            artifact,
+            baseline.BaselineDirectory!,
+            slot,
+            "Tester",
+            Path.Combine(_root, "pre-import"));
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+        Assert.Equal(
+            preparedPayloadHash,
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(stableBlob))));
+        var after = await adapter.InspectLocalStorageAsync();
+        Assert.Equal(stableBlob, Path.Combine(wgs, after.Worlds.Single().BlobRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+    }
+
+    [Fact]
     public async Task ReplaceManagedSlotRollsBackFullSnapshotWhenProtectedWorldMutatesAfterWrite()
     {
         var wgs = CreateWgs();
@@ -1789,6 +1897,21 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         var metadata = File.ReadAllBytes(containerMetadataPath);
         blobId.TryWriteBytes(metadata.AsSpan(152, 16));
         File.WriteAllBytes(containerMetadataPath, metadata);
+    }
+
+    private static void PointFixtureCurrentBlobToMissingGeneration(string containerMetadataPath)
+    {
+        var metadata = File.ReadAllBytes(containerMetadataPath);
+        Guid.NewGuid().TryWriteBytes(metadata.AsSpan(152, 16));
+        File.WriteAllBytes(containerMetadataPath, metadata);
+    }
+
+    private static async Task<string> ReadArtifactPayloadHashAsync(string artifactPath)
+    {
+        using var archive = ZipFile.OpenRead(artifactPath);
+        var payload = Assert.Single(archive.Entries, entry => entry.FullName == "payload/world.save");
+        await using var stream = payload.Open();
+        return Convert.ToHexStringLower(await System.Security.Cryptography.SHA256.HashDataAsync(stream));
     }
 
     private static string CreateMalformedContainerMetadata(string wgs, string directoryName)
