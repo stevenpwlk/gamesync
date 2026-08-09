@@ -162,7 +162,29 @@ L’acceptation réelle exige :
 7. seconde prise en main confirmant la réutilisation du même nom logique ;
 8. répétition du parcours de première configuration sur un PC vierge avant diffusion à Bob.
 
-## 11. Hors périmètre
+## 11. Compatibilité avec le Lot 3 — mise à jour et rollback
+
+L’identité du slot permanent est stockée séparément dans :
+
+`%ProgramData%\GameSaveHub\managed-slot.json`
+
+Elle n’est pas ajoutée à `client-state.json`. Une ancienne version du client désérialise uniquement les champs qu’elle connaît puis réécrit ce fichier lors d’un changement d’état ; elle pourrait donc supprimer silencieusement des champs de slot ajoutés au même document. Le fichier séparé possède son propre schéma, ses écritures atomiques et reste conservé avec les autres données `ProgramData` lors d’une mise à jour ou désinstallation.
+
+Le verrou de sûreté du futur updater couvre les opérations suivantes en plus des sessions déjà prévues :
+
+- première configuration du slot ;
+- rattachement d’un slot existant ;
+- migration du nom visible historique ;
+- réparation ou revue manuelle du slot ;
+- toute inspection, baseline, écriture, réconciliation ou validation WGS associée.
+
+Une mise à jour ne peut être activée que lorsque le jeu est fermé, qu’aucune session locale n’est active, qu’aucune opération de slot ne détient le verrou de transition et que les checkpoints du transfert et du slot sont durables. Le contrôle de santé de l’updater est strictement en lecture seule et ne déclenche jamais de migration WGS.
+
+Après déploiement du slot permanent, l’API utilise `ClientCompatibility.MinimumAcquireVersion` pour empêcher un ancien client de prendre la main et de recréer des placeholders. Le déploiement reste additif : l’API compatible est installée d’abord avec la version minimale non contraignante, les clients compatibles sont installés et vérifiés, puis la version minimale est relevée explicitement. Un client trop ancien peut toujours lire l’état du monde mais reçoit `client_update_required` à l’acquisition.
+
+Le premier client comprenant le slot permanent constitue le socle installé manuellement avant l’activation de la chaîne Lot 3. Après toute migration réelle du slot, un rollback automatique ne peut cibler qu’une version qui comprend `managed-slot.json` et respecte le même verrou d’acquisition. Les versions antérieures restent des artefacts historiques ou de récupération administrative ; elles ne sont pas des cibles d’activation automatique.
+
+## 12. Hors périmètre
 
 Cette correction n’ajoute pas :
 
