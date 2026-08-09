@@ -35,6 +35,8 @@ Les mondes issus des essais portent un nom affiché commençant par `GSHIMPORT` 
 | `Standard-1` | monde historique de Steven |
 | `Shlags1` (`Standard-2.json`) | monde de travail historique |
 
+Au 9 août, `Standard-3.json` et `Standard-4.json` portent **le même nom affiché** `GSH-SHLAGS-RETURN`. Ce n'est pas un accident : ils ont été conservés volontairement pour éprouver en conditions réelles le correctif qui désigne le monde à capturer par son nom logique et non par son nom affiché. Ils sont supprimables une fois la campagne close — mais avant de les supprimer, vérifier qu'aucune session ne les référence encore dans `%ProgramData%\GameSaveHub\transfers\*\session.json` (champ `targetLogicalName`).
+
 ### Procédure
 
 1. Fermer toute application GameSave Hub.

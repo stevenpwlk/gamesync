@@ -20,6 +20,25 @@ Le passage à `true` est interdit tant que les preuves suivantes ne sont pas ré
 Tout échec de cette liste impose le no-go documenté. Le déploiement NAS ne constitue pas une preuve de portabilité WGS.
 
 
+## État des preuves au 9 août 2026
+
+Relevé vérifié sur le NAS et sur `PC-STEVEN`, pas repris du paragraphe suivant.
+
+| # | Condition | État |
+|---|---|---|
+| 1 | Rapport Probe du PC distant analysé | ✅ |
+| 2 | Monde jetable identifié sur chaque PC | ✅ |
+| 3 | Snapshots cohérents avant chaque mutation | ✅ |
+| 4 | Trois cycles complets A → B → A | ❌ 2 cycles aboutis, mais sur une seule machine |
+| 5 | Identités, inventaires, équipements, positions, rôle hôte conservés | ✅ |
+| 6 | Redémarrage Windows inclus | ❌ jamais testé |
+| 7 | Xbox Cloud connecté et conflits simulés | ⚠️ connecté oui, conflit jamais provoqué |
+| 8 | Aucun remplacement cloud indéterministe | ✅ |
+
+S'y ajoute la reprise après interruption, exigée par la revue finale : la reprise après **échec de capture** est prouvée en conditions réelles (session `f85bcb7e`, reprise automatique au redémarrage du service, publication de la version `fe32692b`). La coupure **pendant l'import** reste à éprouver.
+
+Le verrou serveur est actuellement **ouvert** pour la campagne pilote sur le seul monde `Shlags1`. Cette ouverture est temporaire et doit être refermée en fin de campagne : elle ne vaut pas levée du go/no-go, qui porte sur l'ouverture générale.
+
 ## État des preuves au 7 août 2026
 
 Acquis :

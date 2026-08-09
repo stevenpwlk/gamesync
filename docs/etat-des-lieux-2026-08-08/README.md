@@ -1,5 +1,15 @@
 # GameSave Hub — État des lieux complet (8 août 2026)
 
+> **Ce document est daté.** Il enregistre l'état constaté le 8 août 2026 et n'est pas mis à jour : le réécrire effacerait la trace de ce qui était vrai ce jour-là. Trois de ses conclusions ont été dépassées depuis.
+>
+> | Conclusion du 8 août | État au 9 août |
+> |---|---|
+> | Le build Portainer de l'API bloque tout | Contourné : construction par GitHub Actions vers GHCR, API `0.3.1` en service |
+> | Le dépôt Git ne contient aucun commit | Historique en place, distant GitHub, arbre de travail promu depuis le ZIP de référence |
+> | Les paliers B, C et D sont à l'arrêt | Franchis. Deux transferts complets ont abouti |
+>
+> **Pour l'état courant, lire [05 — Reste à faire](05-RESTE-A-FAIRE.md)**, seul document de ce dossier tenu à jour.
+
 Audit réalisé le 8 août 2026 sur `C:\Users\steve\OneDrive\Code\gamesync`.
 
 Sources analysées :
@@ -19,7 +29,7 @@ Sources analysées :
 | [02 — Architecture et code](02-ARCHITECTURE-ET-CODE.md) | Les 13 projets .NET, l'API, la machine d'états, les formats, les tests |
 | [03 — Historique](03-HISTORIQUE.md) | Chronologie complète du 2 au 8 août, expériences et preuves obtenues |
 | [04 — État du dépôt](04-ETAT-DU-DEPOT.md) | Inventaire fichier par fichier et les 12 anomalies constatées |
-| [05 — Reste à faire](05-RESTE-A-FAIRE.md) | Blocage actuel, jalons restants, critères go/no-go |
+| [05 — Reste à faire](05-RESTE-A-FAIRE.md) | **Tenu à jour.** État courant, jalons restants, critères go/no-go |
 | [06 — Plan de rangement](06-PLAN-DE-RANGEMENT.md) | Proposition de tri du dépôt, cible et séquence d'exécution |
 | [07 — Revue critique du code](07-REVUE-CRITIQUE.md) | Défauts vérifiés dans les sources et remises en question d'architecture |
 | [08 — Diagnostic du NAS](08-DIAGNOSTIC-NAS.md) | Pourquoi le build Portainer échouait, et l'état réel du NAS |
