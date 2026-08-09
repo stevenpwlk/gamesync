@@ -607,10 +607,20 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         var detection = await DetectInstallationAsync(cancellationToken);
         if (detection.WgsRoot is null) return ManagedSlotBaselineFailed("Stockage WGS introuvable.");
 
-        var fullOutputRoot = Path.GetFullPath(outputRoot);
-        var finalPathResolver = _options.FinalPathResolver ?? Path.GetFullPath;
-        var resolvedOutputRoot = finalPathResolver(fullOutputRoot);
-        var resolvedWgsRoot = finalPathResolver(detection.WgsRoot);
+        string fullOutputRoot;
+        string resolvedOutputRoot;
+        string resolvedWgsRoot;
+        try
+        {
+            fullOutputRoot = Path.GetFullPath(outputRoot);
+            var finalPathResolver = _options.FinalPathResolver ?? FileSafety.ResolveDirectoryLinks;
+            resolvedOutputRoot = finalPathResolver(fullOutputRoot);
+            resolvedWgsRoot = finalPathResolver(detection.WgsRoot);
+        }
+        catch (Exception exception) when (IsPathValidationException(exception))
+        {
+            return ManagedSlotBaselineFailed("Résolution physique du chemin impossible : " + exception.Message);
+        }
         if (FileSafety.IsSameOrDescendant(fullOutputRoot, detection.WgsRoot) ||
             FileSafety.IsSameOrDescendant(detection.WgsRoot, fullOutputRoot) ||
             FileSafety.IsSameOrDescendant(resolvedOutputRoot, resolvedWgsRoot) ||
@@ -620,9 +630,11 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         }
 
         var before = await InspectLocalStorageAsync(cancellationToken);
-        if (!before.Stable || before.GameRunning)
+        if (!before.Stable || before.GameRunning || before.Warnings.Count > 0)
         {
-            return ManagedSlotBaselineFailed("Le stockage WGS n'est pas stable ou le jeu est encore ouvert.");
+            return ManagedSlotBaselineFailed(
+                "Le stockage WGS n'est pas stable, le jeu est encore ouvert ou l'inspection contient des éléments non interprétables : " +
+                string.Join("; ", before.Warnings));
         }
 
         var matchingTargets = before.Worlds
@@ -671,6 +683,12 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
 
             if (ProbeProcesses().Count > 0) throw new IOException("Le jeu a été lancé pendant la baseline du slot permanent.");
             var after = await InspectLocalStorageAsync(cancellationToken);
+            if (!after.Stable || after.GameRunning || after.Warnings.Count > 0)
+            {
+                throw new IOException(
+                    "La seconde observation de la baseline n'est pas sûre : jeu ouvert, stockage instable ou warnings WGS : " +
+                    string.Join("; ", after.Warnings));
+            }
             if (!Equivalent(before.Files, after.Files)) throw new IOException("Le stockage WGS a changé pendant la baseline du slot permanent.");
 
             var protectedWorlds = before.Worlds
@@ -708,10 +726,24 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
             Directory.Move(temporary, destination);
             return new ManagedSlotBaselineResult(true, destination, manifest, []);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+        catch (Exception exception) when (exception is InvalidDataException || IsPathValidationException(exception))
         {
-            if (Directory.Exists(temporary)) Directory.Delete(temporary, recursive: true);
-            return ManagedSlotBaselineFailed(exception.Message);
+            string? cleanupError = null;
+            if (Directory.Exists(temporary))
+            {
+                try
+                {
+                    Directory.Delete(temporary, recursive: true);
+                }
+                catch (Exception cleanupException)
+                {
+                    cleanupError = cleanupException.Message;
+                }
+            }
+            return ManagedSlotBaselineFailed(
+                cleanupError is null
+                    ? exception.Message
+                    : exception.Message + "; nettoyage de la baseline partielle impossible : " + cleanupError);
         }
     }
 
@@ -761,17 +793,28 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
 
         var detection = await DetectInstallationAsync(cancellationToken);
         if (detection.WgsRoot is null) return ImportFailed("Stockage WGS courant introuvable.");
-        if (PathsOverlap(baselineDirectory, detection.WgsRoot))
+        try
         {
-            return ImportFailed("La baseline du slot permanent doit être séparée du stockage WGS courant.");
+            if (PathsOverlap(baselineDirectory, detection.WgsRoot))
+            {
+                return ImportFailed("La baseline du slot permanent doit être séparée du stockage WGS courant.");
+            }
+            if (PathsOverlap(preImportBackupOutputRoot, detection.WgsRoot))
+            {
+                return ImportFailed("Le dossier de snapshot pré-import doit être séparé du stockage WGS courant.");
+            }
         }
-        if (PathsOverlap(preImportBackupOutputRoot, detection.WgsRoot))
+        catch (Exception exception) when (IsPathValidationException(exception))
         {
-            return ImportFailed("Le dossier de snapshot pré-import doit être séparé du stockage WGS courant.");
+            return ImportFailed("Résolution physique du chemin impossible : " + exception.Message);
         }
 
         var current = await InspectLocalStorageAsync(cancellationToken);
         if (!current.Stable || current.GameRunning) return ImportFailed("Le stockage WGS courant n'est pas stable.");
+        if (current.Warnings.Count > 0)
+        {
+            return ImportFailed(["L'inspection WGS contient des warnings de métadonnées ou de conteneur.", .. current.Warnings]);
+        }
         var topologyErrors = VerifyManagedSlotWorldTopology(baseline, current);
         if (topologyErrors.Count > 0) return ImportFailed(topologyErrors);
         var protectedErrors = VerifyProtectedWorlds(baseline, current);
@@ -836,6 +879,12 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
             {
                 throw new IOException("Le jeu a été lancé ou WGS a changé juste avant l'écriture du slot permanent.");
             }
+            if (justBeforeWrite.Warnings.Count > 0)
+            {
+                throw new IOException(
+                    "L'inspection WGS contient des warnings de métadonnées ou de conteneur juste avant l'écriture : " +
+                    string.Join("; ", justBeforeWrite.Warnings));
+            }
             var lastTopologyErrors = VerifyManagedSlotWorldTopology(baseline, justBeforeWrite);
             if (lastTopologyErrors.Count > 0)
             {
@@ -859,9 +908,66 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 throw new IOException("Le blob physique du slot permanent a tourné juste avant l'écriture.");
             }
 
-            File.Move(temporary, targetBlob, overwrite: true);
-            writePerformed = true;
-            var finalHash = await FileSafety.ComputeSha256Async(targetBlob, cancellationToken);
+            var metadataPath = await FindContainerMetadataForManagedTargetAsync(
+                targetBlob,
+                baseline.Target.LogicalName,
+                cancellationToken);
+            string finalHash;
+            await using (var metadataLock = new FileStream(
+                             metadataPath,
+                             FileMode.Open,
+                             FileAccess.Read,
+                             FileShare.Read,
+                             16 * 1024,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                var lockedMetadata = await ReadAllBytesFromLockedStreamAsync(metadataLock, cancellationToken);
+                if (!ContainerMetadataPointsAtBlob(
+                        metadataPath,
+                        lockedMetadata,
+                        baseline.Target.LogicalName,
+                        targetBlob))
+                {
+                    throw new IOException("Le pointeur WGS du slot permanent a tourné avant l'acquisition du verrou.");
+                }
+
+                await using var targetLock = new FileStream(
+                    targetBlob,
+                    FileMode.Open,
+                    FileAccess.ReadWrite,
+                    FileShare.None,
+                    128 * 1024,
+                    FileOptions.Asynchronous | FileOptions.WriteThrough);
+                var compareHash = await ComputeSha256FromLockedStreamAsync(targetLock, cancellationToken);
+                if (!compareHash.Equals(baseline.Target.BeforePayloadSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new IOException("Le slot permanent a changé pendant l'acquisition du verrou exclusif.");
+                }
+
+                var confirmedMetadata = await ReadAllBytesFromLockedStreamAsync(metadataLock, cancellationToken);
+                if (!lockedMetadata.AsSpan().SequenceEqual(confirmedMetadata) ||
+                    !ContainerMetadataPointsAtBlob(
+                        metadataPath,
+                        confirmedMetadata,
+                        baseline.Target.LogicalName,
+                        targetBlob))
+                {
+                    throw new IOException("Le pointeur WGS du slot permanent a changé pendant le verrouillage.");
+                }
+                if (ProbeProcesses().Count > 0)
+                {
+                    throw new IOException("Le jeu a été lancé juste avant la mutation du slot permanent.");
+                }
+
+                writePerformed = true;
+                targetLock.Position = 0;
+                targetLock.SetLength(0);
+                await targetLock.WriteAsync(payload, cancellationToken);
+                await targetLock.FlushAsync(cancellationToken);
+                targetLock.Flush(flushToDisk: true);
+                finalHash = await ComputeSha256FromLockedStreamAsync(targetLock, cancellationToken);
+            }
+            File.Delete(temporary);
             if (!finalHash.Equals(importedHash, StringComparison.OrdinalIgnoreCase))
             {
                 throw new IOException("Le hash après remplacement ne correspond pas au payload préparé.");
@@ -869,6 +975,12 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
 
             var after = await InspectLocalStorageAsync(cancellationToken);
             if (!after.Stable || after.GameRunning) throw new IOException("WGS n'est pas stable après le remplacement.");
+            if (after.Warnings.Count > 0)
+            {
+                throw new IOException(
+                    "L'inspection WGS finale contient des warnings de métadonnées ou de conteneur : " +
+                    string.Join("; ", after.Warnings));
+            }
             var afterTopologyErrors = VerifyManagedSlotWorldTopology(baseline, after);
             if (afterTopologyErrors.Count > 0)
             {
@@ -896,23 +1008,40 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 importedHash,
                 []);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (Exception exception)
         {
-            if (File.Exists(temporary)) File.Delete(temporary);
-            var errors = new List<string> { exception.Message };
+            var errors = new List<string>
+            {
+                exception is OperationCanceledException
+                    ? "OPÉRATION PRINCIPALE ANNULÉE : " + exception.Message
+                    : $"ÉCHEC PRINCIPAL ({exception.GetType().Name}) : {exception.Message}"
+            };
+            if (!writePerformed && File.Exists(temporary))
+            {
+                try
+                {
+                    File.Delete(temporary);
+                }
+                catch (Exception cleanupException)
+                {
+                    errors.Add("Échec du nettoyage du staging avant mutation : " + cleanupException.Message);
+                }
+            }
             if (writePerformed)
             {
                 try
                 {
-                    await RestoreFullSnapshotAsync(
+                    var quarantineDirectory = await RestoreFullSnapshotAsync(
                         preImportSnapshot.SnapshotDirectory,
                         detection.WgsRoot,
-                        cancellationToken);
-                    errors.Add("Le snapshot pré-import complet a été restauré automatiquement après l'échec.");
+                        CancellationToken.None);
+                    errors.Add(quarantineDirectory is null
+                        ? "ROLLBACK RÉUSSI : le snapshot pré-import complet a été restauré après l'échec principal."
+                        : $"ROLLBACK RÉUSSI : le snapshot pré-import complet a été restauré et les ajouts WGS ont été préservés en quarantaine : {quarantineDirectory}");
                 }
-                catch (Exception rollbackException) when (rollbackException is IOException or InvalidDataException or UnauthorizedAccessException)
+                catch (Exception rollbackException)
                 {
-                    errors.Add("ÉCHEC DU ROLLBACK AUTOMATIQUE : " + rollbackException.Message);
+                    errors.Add($"ÉCHEC DU ROLLBACK AUTOMATIQUE ({rollbackException.GetType().Name}) : {rollbackException.Message}");
                 }
             }
             return new PortableImportResult(
@@ -1035,14 +1164,26 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 importedHash,
                 ["Stockage WGS courant introuvable."]);
         }
-        if (PathsOverlap(baselineDirectory, detection.WgsRoot))
+        try
+        {
+            if (PathsOverlap(baselineDirectory, detection.WgsRoot))
+            {
+                return new ManagedSlotReconciliationResult(
+                    ManagedSlotReconciliationState.InvalidBaseline,
+                    baseline.Target.LogicalName,
+                    null,
+                    importedHash,
+                    ["La baseline du slot permanent doit être séparée du stockage WGS courant."]);
+            }
+        }
+        catch (Exception exception) when (IsPathValidationException(exception))
         {
             return new ManagedSlotReconciliationResult(
                 ManagedSlotReconciliationState.InvalidBaseline,
                 baseline.Target.LogicalName,
                 null,
                 importedHash,
-                ["La baseline du slot permanent doit être séparée du stockage WGS courant."]);
+                ["Résolution physique de la baseline impossible : " + exception.Message]);
         }
 
         LocalStorageInspection current;
@@ -1067,6 +1208,15 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 null,
                 importedHash,
                 ["Le stockage WGS courant n'est pas stable."]);
+        }
+        if (current.Warnings.Count > 0)
+        {
+            return new ManagedSlotReconciliationResult(
+                ManagedSlotReconciliationState.UnexpectedTargetContent,
+                baseline.Target.LogicalName,
+                null,
+                importedHash,
+                ["L'inspection WGS contient des warnings de métadonnées ou de conteneur.", .. current.Warnings]);
         }
 
         var protectedErrors = VerifyProtectedWorlds(baseline, current);
@@ -1892,6 +2042,85 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         return Path.Combine(directory, stableName);
     }
 
+    private static async Task<string> FindContainerMetadataForManagedTargetAsync(
+        string targetBlob,
+        string logicalName,
+        CancellationToken cancellationToken)
+    {
+        var targetDirectory = Path.GetDirectoryName(targetBlob)
+            ?? throw new InvalidDataException("Le blob cible WGS n'a pas de dossier parent.");
+        var matches = new List<string>();
+        foreach (var metadataPath in Directory
+                     .EnumerateFiles(targetDirectory, "container.*", SearchOption.TopDirectoryOnly)
+                     .Order(StringComparer.OrdinalIgnoreCase))
+        {
+            var metadataInfo = new FileInfo(metadataPath);
+            FileSafety.RejectReparsePoint(metadataInfo);
+            var metadata = await File.ReadAllBytesAsync(metadataPath, cancellationToken);
+            if (ContainerMetadataPointsAtBlob(metadataPath, metadata, logicalName, targetBlob))
+            {
+                matches.Add(metadataPath);
+            }
+        }
+
+        return matches.Count == 1
+            ? matches[0]
+            : throw new InvalidDataException(
+                $"Le conteneur WGS du slot logique '{logicalName}' est absent ou ambigu au moment du verrouillage.");
+    }
+
+    private static bool ContainerMetadataPointsAtBlob(
+        string metadataPath,
+        byte[] metadata,
+        string logicalName,
+        string expectedBlob)
+    {
+        if (metadata.Length < 8) return false;
+        var entryCount = BitConverter.ToInt32(metadata, 4);
+        if (entryCount is < 0 or > 1024 || metadata.Length < 8 + entryCount * 160) return false;
+
+        var matchingEntries = 0;
+        for (var index = 0; index < entryCount; index++)
+        {
+            var offset = 8 + index * 160;
+            if (!ReadNullTerminatedUnicode(metadata.AsSpan(offset, 128)).Equals(logicalName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var currentName = new Guid(metadata.AsSpan(offset + 144, 16)).ToString("N").ToUpperInvariant();
+            var currentPath = Path.Combine(Path.GetDirectoryName(metadataPath)!, currentName);
+            if (!Path.GetFullPath(currentPath).Equals(Path.GetFullPath(expectedBlob), StringComparison.OrdinalIgnoreCase) ||
+                !File.Exists(currentPath))
+            {
+                return false;
+            }
+            matchingEntries++;
+        }
+        return matchingEntries == 1;
+    }
+
+    private static async Task<byte[]> ReadAllBytesFromLockedStreamAsync(
+        FileStream stream,
+        CancellationToken cancellationToken)
+    {
+        if (stream.Length > int.MaxValue) throw new InvalidDataException("Les métadonnées WGS sont trop volumineuses.");
+        var bytes = new byte[(int)stream.Length];
+        stream.Position = 0;
+        await stream.ReadExactlyAsync(bytes, cancellationToken);
+        return bytes;
+    }
+
+    private static async Task<string> ComputeSha256FromLockedStreamAsync(
+        FileStream stream,
+        CancellationToken cancellationToken)
+    {
+        stream.Position = 0;
+        var hash = await System.Security.Cryptography.SHA256.HashDataAsync(stream, cancellationToken);
+        stream.Position = 0;
+        return Convert.ToHexStringLower(hash);
+    }
+
     private static bool PlayersEquivalent(IReadOnlyList<DiscoveredPlayer> left, IReadOnlyList<DiscoveredPlayer> right) =>
         left.OrderBy(player => player.Id).SequenceEqual(right.OrderBy(player => player.Id));
 
@@ -2041,7 +2270,7 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         {
             root = Path.GetFullPath(baselineDirectory);
         }
-        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (IsPathValidationException(exception))
         {
             return (null, [$"Chemin de baseline invalide : {exception.Message}"]);
         }
@@ -2208,7 +2437,7 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 }
             }
         }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         {
             errors.Add("Validation de la baseline impossible : " + exception.Message);
         }
@@ -2311,7 +2540,7 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
     {
         var fullLeft = Path.GetFullPath(left);
         var fullRight = Path.GetFullPath(right);
-        var finalPathResolver = _options.FinalPathResolver ?? Path.GetFullPath;
+        var finalPathResolver = _options.FinalPathResolver ?? FileSafety.ResolveDirectoryLinks;
         var resolvedLeft = finalPathResolver(fullLeft);
         var resolvedRight = finalPathResolver(fullRight);
         return FileSafety.IsSameOrDescendant(fullLeft, fullRight) ||
@@ -2320,12 +2549,22 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                FileSafety.IsSameOrDescendant(resolvedRight, resolvedLeft);
     }
 
-    private static async Task RestoreFullSnapshotAsync(
+    private static bool IsPathValidationException(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or NotSupportedException;
+
+    private static async Task<string?> RestoreFullSnapshotAsync(
         string snapshotDirectory,
         string currentWgsRoot,
         CancellationToken cancellationToken)
     {
         var snapshotRoot = Path.GetFullPath(snapshotDirectory);
+        var physicalSnapshotRoot = FileSafety.ResolveDirectoryLinks(snapshotRoot);
+        var physicalCurrentWgsRoot = FileSafety.ResolveDirectoryLinks(currentWgsRoot);
+        if (FileSafety.IsSameOrDescendant(physicalSnapshotRoot, physicalCurrentWgsRoot) ||
+            FileSafety.IsSameOrDescendant(physicalCurrentWgsRoot, physicalSnapshotRoot))
+        {
+            throw new InvalidDataException("Le snapshot de rollback n'est pas physiquement séparé du stockage WGS courant.");
+        }
         var validation = await ValidateSnapshotSourceAsync(
             snapshotRoot,
             Path.Combine(snapshotRoot, "snapshot-manifest.json"),
@@ -2336,6 +2575,45 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         }
 
         var snapshotWgs = Path.Combine(snapshotRoot, "wgs");
+        var expectedPaths = validation.Manifest.Files
+            .Select(file => file.RelativePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var unexpectedPaths = EnumerateSafeFiles(currentWgsRoot)
+            .Select(path => FileSafety.GetSafeRelativePath(currentWgsRoot, path))
+            .Where(path => !expectedPaths.Contains(path))
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        string? quarantineDirectory = null;
+        if (unexpectedPaths.Length > 0)
+        {
+            quarantineDirectory = Path.Combine(
+                snapshotRoot,
+                "rollback-quarantine",
+                $"{DateTimeOffset.UtcNow:yyyyMMddTHHmmssZ}-{Guid.NewGuid():N}");
+            var quarantineWgs = Path.Combine(quarantineDirectory, "wgs");
+            Directory.CreateDirectory(quarantineWgs);
+            var physicalQuarantineWgs = FileSafety.ResolveDirectoryLinks(quarantineWgs);
+            if (!FileSafety.IsSameOrDescendant(physicalQuarantineWgs, physicalSnapshotRoot) ||
+                FileSafety.IsSameOrDescendant(physicalQuarantineWgs, physicalCurrentWgsRoot) ||
+                FileSafety.IsSameOrDescendant(physicalCurrentWgsRoot, physicalQuarantineWgs))
+            {
+                throw new InvalidDataException("La quarantaine de rollback n'est pas physiquement contenue hors WGS dans le snapshot.");
+            }
+            foreach (var relativePath in unexpectedPaths)
+            {
+                var source = ResolveContainedPath(currentWgsRoot, relativePath);
+                var destination = ResolveContainedPath(quarantineWgs, relativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                var sourceHash = await FileSafety.ComputeSha256Async(source, cancellationToken);
+                File.Move(source, destination, overwrite: false);
+                var quarantineHash = await FileSafety.ComputeSha256Async(destination, cancellationToken);
+                if (!sourceHash.Equals(quarantineHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new IOException($"La quarantaine n'a pas préservé le hash de l'ajout WGS : {relativePath}");
+                }
+            }
+        }
+
         var staged = new List<(string Temporary, string Destination, string ExpectedSha256)>();
         try
         {
@@ -2359,9 +2637,6 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 File.Move(file.Temporary, file.Destination, overwrite: true);
             }
 
-            var expectedPaths = validation.Manifest.Files
-                .Select(file => file.RelativePath)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var actualPaths = EnumerateSafeFiles(currentWgsRoot)
                 .Select(path => FileSafety.GetSafeRelativePath(currentWgsRoot, path))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -2386,6 +2661,7 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 if (File.Exists(file.Temporary)) File.Delete(file.Temporary);
             }
         }
+        return quarantineDirectory;
     }
 
     private static async Task<(ImportBaselineManifest? Manifest, IReadOnlyList<string> Errors)> ValidateImportBaselineSourceAsync(

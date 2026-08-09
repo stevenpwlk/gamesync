@@ -628,6 +628,28 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         Assert.False(result.Success);
         Assert.Null(result.BaselineDirectory);
         Assert.Contains(result.Errors, error => error.Contains("chang", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(Directory.Exists(output) ? Directory.EnumerateFileSystemEntries(output) : []);
+    }
+
+    [Fact]
+    public async Task ManagedSlotBaselineRejectsGameStartingDuringSecondObservationEvenWhenFilesAreEquivalent()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        var output = Path.Combine(_root, "managed-baseline");
+        var probeCount = 0;
+        var adapter = CreateAdapter(() =>
+        {
+            probeCount++;
+            return probeCount == 4 ? [(42, "Planet Crafter")] : [];
+        });
+
+        var result = await adapter.CreateManagedSlotBaselineAsync(
+            new("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE"),
+            output);
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error => error.Contains("jeu", StringComparison.OrdinalIgnoreCase));
         Assert.Empty(Directory.EnumerateFileSystemEntries(output));
     }
 
@@ -649,7 +671,7 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         Assert.False(result.Success);
         Assert.Null(result.BaselineDirectory);
         Assert.Contains(result.Errors, error => error.Contains("interprét", StringComparison.OrdinalIgnoreCase));
-        Assert.Empty(Directory.EnumerateFileSystemEntries(output));
+        Assert.Empty(Directory.Exists(output) ? Directory.EnumerateFileSystemEntries(output) : []);
     }
 
     [Fact]
@@ -667,6 +689,40 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         Assert.False(containing.Success);
         Assert.Contains(inside.Errors, error => error.Contains("sépar", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(containing.Errors, error => error.Contains("sépar", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ManagedSlotBaselineRejectsDefaultPhysicalLinkIntoWgsBeforeCopyingWhenSupported()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        var linkedOutput = Path.Combine(_root, "linked-managed-baseline");
+        if (!TryCreateDirectoryLink(linkedOutput, wgs)) return;
+        var beforeFiles = await ReadFixtureFileHashesAsync(wgs);
+
+        var result = await CreateAdapter().CreateManagedSlotBaselineAsync(
+            new("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE"),
+            linkedOutput);
+        DeleteDirectoryLink(linkedOutput);
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error => error.Contains("sépar", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
+    }
+
+    [Fact]
+    public async Task ManagedSlotBaselineReturnsFailureWhenPhysicalPathResolutionFails()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        var adapter = CreateAdapter(finalPathResolver: _ => throw new InvalidOperationException("physical-resolution-failed"));
+
+        var result = await adapter.CreateManagedSlotBaselineAsync(
+            new("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE"),
+            Path.Combine(_root, "managed-baseline"));
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error => error.Contains("physical-resolution-failed", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -704,6 +760,32 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
     }
 
     [Fact]
+    public async Task ReplaceManagedSlotRejectsBackupPhysicalLinkIntoWgsBeforeSnapshotWhenSupported()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        var adapter = CreateAdapter();
+        var artifact = await PrepareManagedSlotArtifactAsync(adapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-linked-backup");
+        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
+        var baseline = await adapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
+        var linkedBackup = Path.Combine(_root, "linked-pre-import");
+        if (!TryCreateDirectoryLink(linkedBackup, wgs)) return;
+        var beforeFiles = await ReadFixtureFileHashesAsync(wgs);
+
+        var result = await adapter.ReplaceManagedSlotAsync(
+            artifact,
+            baseline.BaselineDirectory!,
+            slot,
+            "Tester",
+            linkedBackup);
+        DeleteDirectoryLink(linkedBackup);
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error => error.Contains("sépar", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
+    }
+
+    [Fact]
     public async Task ReplaceManagedSlotRejectsTargetChangedSinceBaselineWithoutOverwritingIt()
     {
         var wgs = CreateWgs();
@@ -725,6 +807,30 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         Assert.False(result.Success);
         Assert.Contains(result.Errors, error => error.Contains("baseline", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(changedHash, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob))));
+    }
+
+    [Fact]
+    public async Task ReplaceManagedSlotRejectsContainerWarningsBeforeWritingTargetBlob()
+    {
+        var wgs = CreateWgs();
+        var targetBlob = CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        var adapter = CreateAdapter();
+        var artifact = await PrepareManagedSlotArtifactAsync(adapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-warning-before-write");
+        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
+        var baseline = await adapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
+        var targetBefore = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob)));
+        CreateMalformedContainerMetadata(wgs, "C-MALFORMED-BEFORE-WRITE");
+
+        var result = await adapter.ReplaceManagedSlotAsync(
+            artifact,
+            baseline.BaselineDirectory!,
+            slot,
+            "Tester",
+            Path.Combine(_root, "pre-import"));
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error => error.Contains("conteneur", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(targetBefore, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob))));
     }
 
     [Fact]
@@ -859,6 +965,61 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
     }
 
     [Fact]
+    public async Task ReplaceManagedSlotBlocksPointerRotationAfterFinalHashBeforeWritingTargetBlob()
+    {
+        var wgs = CreateWgs();
+        var targetBlob = CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        var targetDirectory = Path.GetDirectoryName(targetBlob)!;
+        var containerMetadata = Path.Combine(targetDirectory, "container.1");
+        var rotatedBlobId = Guid.NewGuid();
+        var rotatedBlob = Path.Combine(targetDirectory, rotatedBlobId.ToString("N").ToUpperInvariant());
+        File.Copy(targetBlob, rotatedBlob);
+        var setupAdapter = CreateAdapter();
+        var artifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-final-window");
+        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
+        var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
+        var probeCount = 0;
+        var rotationAttempted = false;
+        var rotationBlocked = false;
+        var writeHadAlreadyStarted = false;
+        var adapter = CreateAdapter(() =>
+        {
+            probeCount++;
+            if (probeCount == 8)
+            {
+                rotationAttempted = true;
+                writeHadAlreadyStarted = !Directory
+                    .EnumerateFiles(targetDirectory, ".gsh-managed-import-*.tmp")
+                    .Any();
+                try
+                {
+                    RotateFixtureCurrentBlob(containerMetadata, rotatedBlobId);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    rotationBlocked = true;
+                }
+            }
+            return [];
+        });
+
+        var result = await adapter.ReplaceManagedSlotAsync(
+            artifact,
+            baseline.BaselineDirectory!,
+            slot,
+            "Tester",
+            Path.Combine(_root, "pre-import"));
+
+        Assert.True(rotationAttempted);
+        Assert.False(writeHadAlreadyStarted);
+        Assert.True(rotationBlocked);
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+        Assert.Equal(
+            artifact.Manifest!.PayloadSha256,
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob))));
+    }
+
+    [Fact]
     public async Task ReplaceManagedSlotRollsBackFullSnapshotWhenProtectedWorldMutatesAfterWrite()
     {
         var wgs = CreateWgs();
@@ -873,7 +1034,7 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         var adapter = CreateAdapter(() =>
         {
             probeCount++;
-            if (probeCount == 8) File.AppendAllText(protectedBlob, "post-write-change");
+            if (probeCount == 9) File.AppendAllText(protectedBlob, "post-write-change");
             return [];
         });
 
@@ -891,6 +1052,155 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
     }
 
     [Fact]
+    public async Task ReplaceManagedSlotRollsBackWithIndependentTokenWhenCancellationArrivesAfterWrite()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        CreateWorldFixture(wgs, "Standard-2.json", "ProtectedWorld");
+        var setupAdapter = CreateAdapter();
+        var artifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-cancel-rollback");
+        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
+        var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
+        var beforeFiles = await ReadFixtureFileHashesAsync(wgs);
+        using var cancellation = new CancellationTokenSource();
+        var probeCount = 0;
+        var adapter = CreateAdapter(() =>
+        {
+            probeCount++;
+            if (probeCount == 9) cancellation.Cancel();
+            return [];
+        });
+
+        var result = await adapter.ReplaceManagedSlotAsync(
+            artifact,
+            baseline.BaselineDirectory!,
+            slot,
+            "Tester",
+            Path.Combine(_root, "pre-import"),
+            cancellation.Token);
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error => error.Contains("annul", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Errors, error => error.Contains("rollback", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
+    }
+
+    [Fact]
+    public async Task ReplaceManagedSlotRollsBackWhenPostWriteInspectionThrowsInvalidOperation()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        CreateWorldFixture(wgs, "Standard-2.json", "ProtectedWorld");
+        var setupAdapter = CreateAdapter();
+        var artifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-invalid-operation-rollback");
+        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
+        var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
+        var beforeFiles = await ReadFixtureFileHashesAsync(wgs);
+        var probeCount = 0;
+        var adapter = CreateAdapter(() =>
+        {
+            probeCount++;
+            if (probeCount == 9) throw new InvalidOperationException("post-write-invalid-operation");
+            return [];
+        });
+
+        var result = await adapter.ReplaceManagedSlotAsync(
+            artifact,
+            baseline.BaselineDirectory!,
+            slot,
+            "Tester",
+            Path.Combine(_root, "pre-import"));
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error => error.Contains("post-write-invalid-operation", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Contains("rollback", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
+    }
+
+    [Fact]
+    public async Task ReplaceManagedSlotQuarantinesUnexpectedWgsFilesAndRestoresExactSnapshotSet()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        var protectedBlob = CreateWorldFixture(wgs, "Standard-2.json", "ProtectedWorld");
+        var setupAdapter = CreateAdapter();
+        var artifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-extra-quarantine");
+        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
+        var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
+        var beforeFiles = await ReadFixtureFileHashesAsync(wgs);
+        var backupRoot = Path.Combine(_root, "pre-import");
+        var extraDirectory = Path.Combine(wgs, "C-UNEXPECTED");
+        var extraWgsPath = Path.Combine(extraDirectory, "unexpected-after-write.bin");
+        const string extraContent = "recoverable-unexpected-wgs-content";
+        var probeCount = 0;
+        var adapter = CreateAdapter(() =>
+        {
+            probeCount++;
+            if (probeCount == 9)
+            {
+                File.AppendAllText(protectedBlob, "post-write-protected-change");
+                Directory.CreateDirectory(extraDirectory);
+                File.WriteAllText(extraWgsPath, extraContent);
+            }
+            return [];
+        });
+
+        var result = await adapter.ReplaceManagedSlotAsync(
+            artifact,
+            baseline.BaselineDirectory!,
+            slot,
+            "Tester",
+            backupRoot);
+
+        Assert.False(result.Success);
+        Assert.False(File.Exists(extraWgsPath));
+        Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
+        var quarantinedExtra = Assert.Single(Directory.EnumerateFiles(
+            Path.Combine(result.PreImportSnapshotDirectory!, "rollback-quarantine"),
+            Path.GetFileName(extraWgsPath),
+            SearchOption.AllDirectories));
+        Assert.Equal(extraContent, await File.ReadAllTextAsync(quarantinedExtra));
+        Assert.Contains(result.Errors, error => error.Contains("quarantaine", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ReplaceManagedSlotRollsBackWhenFinalInspectionReportsContainerWarnings()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        CreateWorldFixture(wgs, "Standard-2.json", "ProtectedWorld");
+        var setupAdapter = CreateAdapter();
+        var artifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-warning-after-write");
+        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
+        var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
+        var beforeFiles = await ReadFixtureFileHashesAsync(wgs);
+        var warningPath = string.Empty;
+        var probeCount = 0;
+        var adapter = CreateAdapter(() =>
+        {
+            probeCount++;
+            if (probeCount == 9) warningPath = CreateMalformedContainerMetadata(wgs, "C-MALFORMED-AFTER-WRITE");
+            return [];
+        });
+
+        var result = await adapter.ReplaceManagedSlotAsync(
+            artifact,
+            baseline.BaselineDirectory!,
+            slot,
+            "Tester",
+            Path.Combine(_root, "pre-import"));
+
+        Assert.False(result.Success);
+        Assert.Contains(result.Errors, error => error.Contains("conteneur", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
+        Assert.False(File.Exists(warningPath));
+        Assert.Single(Directory.EnumerateFiles(
+            Path.Combine(result.PreImportSnapshotDirectory!, "rollback-quarantine"),
+            Path.GetFileName(warningPath),
+            SearchOption.AllDirectories));
+    }
+
+    [Fact]
     public async Task ReplaceManagedSlotReportsPrimaryAndRollbackErrorsWhenFullSnapshotCannotBeRead()
     {
         var wgs = CreateWgs();
@@ -904,7 +1214,7 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         var adapter = CreateAdapter(() =>
         {
             probeCount++;
-            if (probeCount == 8)
+            if (probeCount == 9)
             {
                 File.AppendAllText(targetBlob, "post-write-change");
                 var snapshot = Directory.EnumerateDirectories(backupRoot).Single();
@@ -970,10 +1280,33 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
             baseline.BaselineDirectory!,
             slot,
             "Tester");
-
         Assert.Equal(ManagedSlotReconciliationState.PreviousPayloadPresent, result.State);
         Assert.Equal(baseline.Manifest!.Target.BeforePayloadSha256, result.CurrentPayloadSha256);
         Assert.Equal(artifact.Manifest!.PayloadSha256, result.ExpectedImportedPayloadSha256);
+        Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
+    }
+
+    [Fact]
+    public async Task ReconcileManagedSlotReportsUnexpectedContentForContainerWarningsWithoutWritingWgs()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        CreateWorldFixture(wgs, "Standard-2.json", "ProtectedWorld");
+        var adapter = CreateAdapter();
+        var artifact = await PrepareManagedSlotArtifactAsync(adapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "reconcile-warning");
+        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
+        var baseline = await adapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
+        CreateMalformedContainerMetadata(wgs, "C-MALFORMED-RECONCILE");
+        var beforeFiles = await ReadFixtureFileHashesAsync(wgs);
+
+        var result = await adapter.ReconcileManagedSlotReplacementAsync(
+            artifact,
+            baseline.BaselineDirectory!,
+            slot,
+            "Tester");
+
+        Assert.Equal(ManagedSlotReconciliationState.UnexpectedTargetContent, result.State);
+        Assert.Contains(result.Errors, error => error.Contains("conteneur", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
     }
 
@@ -1096,7 +1429,6 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
             baseline.BaselineDirectory!,
             slot,
             "Tester");
-
         Assert.Equal(ManagedSlotReconciliationState.InvalidBaseline, result.State);
         Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
     }
@@ -1124,6 +1456,33 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
             "Tester");
 
         Assert.Equal(ManagedSlotReconciliationState.InvalidBaseline, result.State);
+        Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
+    }
+
+    [Fact]
+    public async Task ReconcileManagedSlotReportsInvalidBaselineForReparsePointWithoutThrowingWhenSupported()
+    {
+        var wgs = CreateWgs();
+        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        var adapter = CreateAdapter();
+        var artifact = await PrepareManagedSlotArtifactAsync(adapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "reconcile-reparse-baseline");
+        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
+        var baseline = await adapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
+        var external = Directory.CreateDirectory(Path.Combine(_root, "reparse-target"));
+        await File.WriteAllTextAsync(Path.Combine(external.FullName, "outside.txt"), "outside");
+        var reparse = Path.Combine(baseline.BaselineDirectory!, "wgs", "linked-directory");
+        if (!TryCreateDirectoryLink(reparse, external.FullName)) return;
+        var beforeFiles = await ReadFixtureFileHashesAsync(wgs);
+
+        var result = await adapter.ReconcileManagedSlotReplacementAsync(
+            artifact,
+            baseline.BaselineDirectory!,
+            slot,
+            "Tester");
+
+        DeleteDirectoryLink(reparse);
+        Assert.Equal(ManagedSlotReconciliationState.InvalidBaseline, result.State);
+        Assert.Contains(result.Errors, error => error.Contains("réanalyse", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
     }
 
@@ -1425,6 +1784,23 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         return Path.Combine(container, blobName);
     }
 
+    private static void RotateFixtureCurrentBlob(string containerMetadataPath, Guid blobId)
+    {
+        var metadata = File.ReadAllBytes(containerMetadataPath);
+        blobId.TryWriteBytes(metadata.AsSpan(152, 16));
+        File.WriteAllBytes(containerMetadataPath, metadata);
+    }
+
+    private static string CreateMalformedContainerMetadata(string wgs, string directoryName)
+    {
+        var directory = Directory.CreateDirectory(Path.Combine(wgs, directoryName));
+        var metadata = new byte[8];
+        BitConverter.GetBytes(2).CopyTo(metadata, 4);
+        var path = Path.Combine(directory.FullName, "container.1");
+        File.WriteAllBytes(path, metadata);
+        return path;
+    }
+
     private async Task<PortableSaveArtifact> PrepareManagedSlotArtifactAsync(
         PlanetCrafterGamePassAdapter adapter,
         string logicalName,
@@ -1454,6 +1830,50 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
                 Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(path)))));
         }
         return entries;
+    }
+
+    private static bool TryCreateDirectoryLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException or NotSupportedException)
+        {
+            if (!OperatingSystem.IsWindows()) return false;
+        }
+
+        try
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            startInfo.ArgumentList.Add("/d");
+            startInfo.ArgumentList.Add("/c");
+            startInfo.ArgumentList.Add("mklink");
+            startInfo.ArgumentList.Add("/J");
+            startInfo.ArgumentList.Add(linkPath);
+            startInfo.ArgumentList.Add(targetPath);
+            using var process = System.Diagnostics.Process.Start(startInfo);
+            if (process is null) return false;
+            process.WaitForExit();
+            return process.ExitCode == 0 && Directory.Exists(linkPath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException or System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+    }
+
+    private static void DeleteDirectoryLink(string linkPath)
+    {
+        if (Directory.Exists(linkPath)) Directory.Delete(linkPath);
     }
 
     private sealed record TestPlayer(int Id, string Name, bool IsHost, int InventoryId, int EquipmentId, string Position);
