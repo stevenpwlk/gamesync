@@ -6,6 +6,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using GameSaveHub.Adapters.PlanetCrafter.GamePass;
 using GameSaveHub.Client.Orchestration;
+using GameSaveHub.Contracts;
 
 namespace GameSaveHub.Client.App;
 
@@ -49,9 +50,10 @@ public sealed partial class MainWindow : Window, IDisposable
     private async void LoadedAsync(object sender, RoutedEventArgs e)
     {
 #if DEBUG
-        if (Environment.GetEnvironmentVariable("GSH_VISUAL_PREVIEW") is "ready")
+        var preview = Environment.GetEnvironmentVariable("GSH_VISUAL_PREVIEW");
+        if (preview is not null)
         {
-            RenderReadyPreview();
+            RenderPreview(preview);
             return;
         }
 #endif
@@ -60,29 +62,51 @@ public sealed partial class MainWindow : Window, IDisposable
     }
 
 #if DEBUG
-    private void RenderReadyPreview()
+    // Aperçus visuels hors ligne (aucun service, aucune écriture WGS) : lancer avec
+    // $env:GSH_VISUAL_PREVIEW="<nom>" avant `dotnet run`. Valeurs : ready, setup-missing,
+    // setup-step1, setup-installing, setup-step2, rebind, repair.
+    private void RenderPreview(string name)
     {
         var worldId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
+        var primaryWorld = new WorldCatalogItemResponse(worldId, "Monde principal", "Available", Guid.NewGuid(), true);
+        var worldStatus = new WorldStatusResponse(
+            worldId, "Monde principal", "Available", Guid.NewGuid(), null, null,
+            new WorldLastActivityResponse(Guid.NewGuid(), "Stevenpwlk", now.AddHours(-2)));
+
+        TransferSession? local = name switch
+        {
+            "setup-step1" => TransferSession.Create(worldId, "Stevenpwlk", now, TransferFlowKind.InitialSlotSetup)
+                with { Stage = TransferStage.AwaitingPlaceholder },
+            "setup-installing" => TransferSession.Create(worldId, "Stevenpwlk", now, TransferFlowKind.InitialSlotSetup)
+                with { Stage = TransferStage.Importing },
+            "setup-step2" => TransferSession.Create(worldId, "Stevenpwlk", now, TransferFlowKind.InitialSlotSetup)
+                with { Stage = TransferStage.ReadyToPlay },
+            _ => null
+        };
+
+        var slotStatus = name switch
+        {
+            "setup-missing" => ManagedSlotStatus.Missing,
+            "rebind" => ManagedSlotStatus.LegacyCandidate,
+            "repair" => ManagedSlotStatus.Ambiguous,
+            _ => ManagedSlotStatus.Ready
+        };
+
         _context = new HomeContextSnapshot(
             true,
             Guid.NewGuid(),
             "Stevenpwlk",
             true,
-            new(worldId, "Monde principal", "Available", Guid.NewGuid(), true),
-            new(
-                worldId,
-                "Monde principal",
-                "Available",
-                Guid.NewGuid(),
-                null,
-                null,
-                new(Guid.NewGuid(), "Stevenpwlk", now.AddHours(-2))),
+            primaryWorld,
+            worldStatus,
             null,
-            null,
+            local,
             null,
             false,
-            true);
+            true,
+            true,
+            slotStatus);
         _view = HomeStatePresenter.Present(_context);
         Render(_context, _view);
     }
