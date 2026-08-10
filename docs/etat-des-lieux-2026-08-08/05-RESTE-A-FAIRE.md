@@ -1,5 +1,7 @@
 # 05 — Reste à faire
 
+> ⚠️ **Archive figée au 8-9 août 2026, non mise à jour.** Pour l'état réel actuel du projet, voir [`docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md`](../operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md).
+
 > Relevé au **9 août 2026, 11 h**. Chaque affirmation ci-dessous a été vérifiée dans le code, sur le NAS ou sur `PC-STEVEN` au moment de la rédaction — pas reprise d'une version antérieure de ce document.
 
 ## Où on en est

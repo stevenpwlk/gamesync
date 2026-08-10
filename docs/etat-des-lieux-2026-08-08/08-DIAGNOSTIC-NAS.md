@@ -1,5 +1,7 @@
 # 08 — Diagnostic du NAS et de l'échec de build Portainer
 
+> ⚠️ **Archive figée au 8-9 août 2026, non mise à jour.** Pour l'état réel actuel du projet, voir [`docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md`](../operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md).
+
 Relevé effectué le 8 août 2026 par SSH, **en lecture seule**, sur `TNASSPA` (`192.168.1.73`, Linux 6.1.120+).
 
 ## Ce que valait l'hypothèse de départ

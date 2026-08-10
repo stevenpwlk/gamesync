@@ -1,5 +1,7 @@
 # 01 — Contexte et produit
 
+> ⚠️ **Archive figée au 8-9 août 2026, non mise à jour.** Pour l'état réel actuel du projet, voir [`docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md`](../operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md).
+
 ## L'objectif réel
 
 Permettre à **quatre joueurs, sur quatre PC Windows 11 différents, avec quatre comptes Xbox différents**, de partager **un seul monde multijoueur** de *The Planet Crafter* (version PC Game Pass) :

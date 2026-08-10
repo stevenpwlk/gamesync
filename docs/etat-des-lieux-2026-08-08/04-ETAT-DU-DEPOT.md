@@ -1,5 +1,7 @@
 # 04 — État du dépôt
 
+> ⚠️ **Archive figée au 8-9 août 2026, non mise à jour.** Pour l'état réel actuel du projet, voir [`docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md`](../operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md).
+
 Photographie prise le 8 août 2026 sur `C:\Users\steve\OneDrive\Code\gamesync`.
 
 ## Inventaire de la racine

@@ -1,5 +1,7 @@
 # 06 — Plan de rangement du dépôt
 
+> ⚠️ **Archive figée au 8-9 août 2026, non mise à jour.** Pour l'état réel actuel du projet, voir [`docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md`](../operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md).
+
 > **Proposition.** Rien de ce qui suit n'a été exécuté. Aucune suppression n'est faite sans validation explicite.
 
 ## Principe directeur

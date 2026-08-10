@@ -1,5 +1,7 @@
 # 07 — Revue critique du code
 
+> ⚠️ **Archive figée au 8-9 août 2026, non mise à jour.** Pour l'état réel actuel du projet, voir [`docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md`](../operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md).
+
 Constats issus de la lecture du code source, pas de la documentation. Chaque point indique ce qui a été vérifié.
 
 ## Ce que le code fait mieux que ce que la doc laisse croire

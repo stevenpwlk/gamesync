@@ -2,31 +2,32 @@
 
 Partager en toute sûreté un monde multijoueur **The Planet Crafter** (PC Game Pass) entre plusieurs PC Windows 11 avec des comptes Xbox différents, chacun pouvant devenir hôte à son tour et retrouver le point exact où les autres se sont arrêtés.
 
-**État au 8 août 2026 : Integrated Client Phase 3 / 0.3.0 r2 — 70/70 tests, les deux verrous d'écriture restent fermés.**
+**État au 9 août 2026 : `main` = Lot 1 fusionné (mini-exporteur + remplacement administratif du monde partagé, 153/153 tests). Le Lot 2 (accueil contextuel, lancement Xbox direct, slot local permanent `GSH-MONDE-PARTAGE`) est en cours sur la branche `codex/v1-lot2-contextual-app` et n'est pas encore fusionné.**
 
-> 📍 **Point de blocage en cours :** le build de l'image `gamesavehub-api:0.3.0` échoue dans Portainer (`Failure / Unable to build image`, sans log). Le NAS tourne toujours sur `gamesavehub-api:0.2.0`, stack intacte. Détail et marche à suivre : [`docs/etat-des-lieux-2026-08-08/05-RESTE-A-FAIRE.md`](docs/etat-des-lieux-2026-08-08/05-RESTE-A-FAIRE.md).
+> 📍 **Source de vérité sur l'avancement réel** (fait / en cours / porte externe à faire valider avec Bob) : [`docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md`](docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md). Le dossier `docs/etat-des-lieux-2026-08-08/` est une archive figée au 8-9 août ; il ne reflète plus l'état courant.
 
 ## Par où commencer
 
 | Si tu veux… | Lis |
 |---|---|
-| Comprendre où en est le projet | [État des lieux complet](docs/etat-des-lieux-2026-08-08/README.md) |
+| Connaître l'avancement réel (fait/en cours/portes externes) | [Checklist de validation](docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md) |
 | Comprendre l'architecture | [ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Comprendre le design du slot permanent (Lot 2) | [Spécification](docs/superpowers/specs/2026-08-09-permanent-local-slot-design.md), [Plan d'implémentation](docs/superpowers/plans/2026-08-09-permanent-local-slot-implementation.md) |
 | Savoir ce qui a été prouvé expérimentalement | [Validation cross-PC](docs/investigation/CROSS-PC-VALIDATION-2026-08.md) et [les preuves](docs/evidence/README.md) |
 | Déployer la Phase 3 | [Protocole de déploiement](docs/deployment/PROTOCOLE-DEPLOIEMENT-PHASE3-0.3.0.md) |
-| Connaître les conditions d'ouverture du transfert | [GO-NOGO.md](docs/operations/GO-NOGO.md) |
 | Déployer ou administrer le NAS | [DEPLOYMENT.md](docs/nas/DEPLOYMENT.md), [ADMIN.md](docs/operations/ADMIN.md) |
+| Remplacer le monde partagé (procédure Bob → export → import admin) | [REPLACE-PRIMARY-WORLD.md](docs/operations/REPLACE-PRIMARY-WORLD.md) |
 
 ## Les deux verrous
 
-Aucun transfert réel n'est possible aujourd'hui. Deux verrous **indépendants** sont fermés :
+Les deux verrous d'écriture ont été **ouverts** après preuves ; de vrais transferts d'hôte ont eu lieu (`Steven → Bob → Steven`, cycles répétés sur `PC-STEVEN`) :
 
-| Verrou | Emplacement | Valeur |
+| Verrou | Emplacement | Valeur observée en pilote |
 |---|---|---|
-| `FeatureGates__AllowHostTransfer` | NAS | `false` |
-| `ClientService:EnableWgsTransfer` | PC | `false` |
+| `FeatureGates__AllowHostTransfer` | NAS | `true` |
+| `ClientService:EnableWgsTransfer` | PC pilote | `true` |
 
-Le script de build vérifie ces deux valeurs et refuse de compiler si elles ont été modifiées. Leur ouverture est conditionnée aux preuves listées dans [GO-NOGO.md](docs/operations/GO-NOGO.md).
+Le script de build vérifie ces valeurs. Les conditions d'ouverture historiques restent documentées dans [GO-NOGO.md](docs/operations/GO-NOGO.md).
 
 ## Ce qui a été prouvé
 
@@ -98,9 +99,23 @@ La couche `GameSaveHub.Client.Orchestration` transforme le pilote en machine d'�
 BUILD-INTEGRATED-PHASE3.cmd
 ```
 
-Le build compile toute la solution, exécute 70 cas de test, publie le package Windows et génère le contexte Docker de l'API 0.3.0.
+Le build compile toute la solution, exécute la suite de tests (153 cas sur `main`), publie le package Windows et génère le contexte Docker de l'API.
 
 Voir [`docs/operations/PHASE3-INTEGRATED-CLIENT.md`](docs/operations/PHASE3-INTEGRATED-CLIENT.md) et [`docs/operations/CLIENT-ORCHESTRATOR-2026-08-07.md`](docs/operations/CLIENT-ORCHESTRATOR-2026-08-07.md).
+
+## Mini-exporteur portable (Lot 1)
+
+Un utilitaire séparé, sans installation ni accès au NAS, permet à un joueur (par ex. Bob) d'exporter sa propre sauvegarde en lecture seule vers un fichier `.gshsave` transmissible :
+
+```text
+tools/build-save-exporter.ps1
+```
+
+Voir la procédure complète : [REPLACE-PRIMARY-WORLD.md](docs/operations/REPLACE-PRIMARY-WORLD.md).
+
+## Lot 2 en cours — accueil contextuel et slot local permanent
+
+Sur la branche `codex/v1-lot2-contextual-app` (non fusionnée) : IHM contextuelle (« Prendre la main » / « Lancer The Planet Crafter » selon l'état réel du monde), lancement direct de l'application Xbox, et un slot WGS local permanent `GSH-MONDE-PARTAGE` créé une seule fois par PC puis réutilisé (plus de placeholder à chaque prise de main). Détails et avancement réel : [checklist](docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md), [spécification](docs/superpowers/specs/2026-08-09-permanent-local-slot-design.md), [plan](docs/superpowers/plans/2026-08-09-permanent-local-slot-implementation.md).
 
 ## Vérification
 
@@ -112,8 +127,8 @@ dotnet test GameSaveHub.slnx
 ## Organisation du dépôt
 
 ```text
-src/        13 projets .NET 10
-tests/      Unit (70 cas) + EndToEnd
+src/        projets .NET 10 (client, service, adaptateur, serveur, exporteur portable)
+tests/      Unit (153 cas sur main) + EndToEnd
 deploy/     compose, Traefik, secrets, stacks Portainer d'administration
 tools/      installation client, tests NAS, scripts de build
 docs/       architecture, investigation, opérations, déploiement, preuves

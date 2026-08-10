@@ -1,5 +1,7 @@
 # 02 — Architecture et code
 
+> ⚠️ **Archive figée au 8-9 août 2026, non mise à jour.** Pour l'état réel actuel du projet, voir [`docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md`](../operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md).
+
 > Toutes les références de code de ce document portent sur la version la plus récente, qui se trouve **dans l'archive** `GameSaveHub-Integrated-Client-Phase3-0.3.0-r2-source.zip` et non dans `src/` sur disque. Voir [04 — État du dépôt](04-ETAT-DU-DEPOT.md).
 
 ## Stack
