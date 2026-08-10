@@ -331,7 +331,7 @@ public sealed partial class PipeServerWorker(
                 "Le pseudo demandé ne correspond pas au profil local enregistré.");
         }
 
-        return ToPipe(await orchestrator.StartAsync(worldId, state.RegisteredPlayerName, cancellationToken));
+        return ToPipe(await orchestrator.StartAsync(worldId, state.RegisteredPlayerName, cancellationToken: cancellationToken));
     }
 
     /// <summary>

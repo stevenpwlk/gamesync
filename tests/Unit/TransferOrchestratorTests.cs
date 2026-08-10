@@ -1,3 +1,4 @@
+using System.Text.Json;
 using GameSaveHub.Adapters.Abstractions;
 using GameSaveHub.Client.Orchestration;
 using GameSaveHub.Contracts;
@@ -6,7 +7,9 @@ namespace GameSaveHub.UnitTests;
 
 public sealed class TransferOrchestratorTests : IDisposable
 {
+    private static readonly JsonSerializerOptions FixtureJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _root = Path.Combine(Path.GetTempPath(), "gsh-orchestrator-tests-" + Guid.NewGuid().ToString("N"));
+    private FakeManagedSlotStore ManagedSlotStore { get; set; } = new();
 
     [Fact]
     public async Task StartReachesAwaitingPlaceholder()
@@ -47,6 +50,125 @@ public sealed class TransferOrchestratorTests : IDisposable
         Assert.True(first.Success);
         Assert.False(second.Success);
         Assert.Equal("active_session_exists", second.Code);
+    }
+
+    [Fact]
+    public async Task OldSessionJsonStillDeserializesAsLegacyPlaceholder()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Fixtures", "transfer-session-v1.json");
+        var json = await File.ReadAllTextAsync(path);
+
+        var session = JsonSerializer.Deserialize<TransferSession>(json, FixtureJsonOptions);
+
+        Assert.NotNull(session);
+        Assert.Equal(TransferFlowKind.LegacyPlaceholder, session!.FlowKind);
+        Assert.Null(session.ManagedSlotCurrentDisplayName);
+        Assert.Null(session.ManagedSlotDesiredDisplayName);
+        Assert.False(session.ManagedSlotBindingCommitted);
+    }
+
+    [Fact]
+    public async Task ManagedSlotReuseWithoutBindingIsRejected()
+    {
+        var (orchestrator, _, _, _) = CreateHarness();
+        var result = await orchestrator.StartAsync(Guid.NewGuid(), "Stevenpwlk", TransferFlowKind.ManagedSlotReuse);
+
+        Assert.False(result.Success);
+        Assert.Equal("managed_slot_binding_missing", result.Code);
+    }
+
+    [Fact]
+    public async Task ReuseImportsImmediatelyWithoutAwaitingPlaceholder()
+    {
+        var (orchestrator, adapter, _, _) = CreateHarness();
+        await ManagedSlotStore.WriteAsync(Binding("Standard-9.json"));
+
+        var result = await orchestrator.StartAsync(Guid.NewGuid(), "Stevenpwlk", TransferFlowKind.ManagedSlotReuse);
+
+        Assert.True(result.Success);
+        Assert.Equal(TransferStage.ReadyToPlay, result.Session!.Stage);
+        Assert.Null(result.Session.PlaceholderName);
+        Assert.Equal("Standard-9.json", result.Session.TargetLogicalName);
+        Assert.Equal(1, adapter.ManagedSlotBaselineCalls);
+        Assert.Equal(1, adapter.ManagedSlotReplaceCalls);
+        Assert.Equal(0, adapter.BaselineCalls);
+        Assert.Equal(1, ManagedSlotStore.WriteCalls);
+    }
+
+    [Fact]
+    public async Task TwoReusesKeepTheSameLogicalName()
+    {
+        var (orchestrator, adapter, server, _) = CreateHarness();
+        await ManagedSlotStore.WriteAsync(Binding("Standard-9.json"));
+
+        var first = await orchestrator.StartAsync(Guid.NewGuid(), "Stevenpwlk", TransferFlowKind.ManagedSlotReuse);
+        Assert.Equal("Standard-9.json", first.Session!.TargetLogicalName);
+        adapter.GameRunning = false;
+        var completed = await orchestrator.CompletePlayAsync(first.Session!.LocalSessionId);
+        Assert.True(completed.Success);
+
+        var second = await orchestrator.StartAsync(Guid.NewGuid(), "Stevenpwlk", TransferFlowKind.ManagedSlotReuse);
+
+        Assert.True(second.Success);
+        Assert.Equal("Standard-9.json", second.Session!.TargetLogicalName);
+        Assert.Equal(2, adapter.ManagedSlotReplaceCalls);
+    }
+
+    [Fact]
+    public async Task InitialSlotSetupUsesFixedPermanentPlaceholderName()
+    {
+        var (orchestrator, _, _, _) = CreateHarness();
+        var result = await orchestrator.StartAsync(Guid.NewGuid(), "Stevenpwlk", TransferFlowKind.InitialSlotSetup);
+
+        Assert.True(result.Success);
+        Assert.Equal(TransferStage.AwaitingPlaceholder, result.Session!.Stage);
+        Assert.Equal(ManagedSlotResolver.PermanentDisplayName, result.Session.PlaceholderName);
+    }
+
+    [Fact]
+    public async Task InitialSlotSetupCommitsBindingAfterValidatedImport()
+    {
+        var (orchestrator, _, _, _) = CreateHarness();
+        var started = await orchestrator.StartAsync(Guid.NewGuid(), "Stevenpwlk", TransferFlowKind.InitialSlotSetup);
+        Assert.Null(await ManagedSlotStore.ReadAsync());
+
+        var result = await orchestrator.ConfirmPlaceholderReadyAsync(started.Session!.LocalSessionId);
+
+        Assert.True(result.Success);
+        Assert.True(result.Session!.ManagedSlotBindingCommitted);
+        var binding = await ManagedSlotStore.ReadAsync();
+        Assert.NotNull(binding);
+        Assert.Equal(result.Session.TargetLogicalName, binding!.LogicalName);
+        Assert.Equal(ManagedSlotResolver.PermanentDisplayName, binding.DesiredDisplayName);
+        Assert.Equal(1, ManagedSlotStore.WriteCalls);
+    }
+
+    [Fact]
+    public async Task RecoveryAfterInitialSetupImportWritesBindingExactlyOnce()
+    {
+        var (orchestrator, adapter, _, store) = CreateHarness();
+        var started = await orchestrator.StartAsync(Guid.NewGuid(), "Stevenpwlk", TransferFlowKind.InitialSlotSetup);
+        var importing = started.Session! with
+        {
+            Stage = TransferStage.Importing,
+            TargetLogicalName = "Standard-9.json",
+            PlaceholderPayloadSha256 = "placeholder",
+            ServerImportStarted = true
+        };
+        await store.WriteAsync(importing, "test-importing");
+        adapter.ReconciliationState = ImportReconciliationState.ImportedArtifactPresent;
+
+        var recovered = await orchestrator.RecoverAllAsync();
+
+        Assert.Single(recovered);
+        Assert.True(recovered[0].Success);
+        Assert.True(recovered[0].Session!.ManagedSlotBindingCommitted);
+        Assert.Equal(1, ManagedSlotStore.WriteCalls);
+
+        var recoveredAgain = await orchestrator.RecoverAllAsync();
+
+        Assert.Single(recoveredAgain);
+        Assert.Equal(1, ManagedSlotStore.WriteCalls);
     }
 
     [Fact]
@@ -224,8 +346,18 @@ public sealed class TransferOrchestratorTests : IDisposable
         var adapter = new FakeAdapter(_root);
         var server = new FakeServer(_root);
         var store = new MemoryStore(_root);
-        return (new TransferOrchestrator(adapter, server, store), adapter, server, store);
+        ManagedSlotStore = new FakeManagedSlotStore();
+        return (new TransferOrchestrator(adapter, server, store, ManagedSlotStore), adapter, server, store);
     }
+
+    private static ManagedSlotBinding Binding(string logicalName) => ManagedSlotBinding.Create(
+        "fake",
+        "pkg",
+        "Stevenpwlk",
+        logicalName,
+        ManagedSlotResolver.PermanentDisplayName,
+        ManagedSlotResolver.PermanentDisplayName,
+        DateTimeOffset.UtcNow);
 
     public void Dispose()
     {
@@ -344,6 +476,21 @@ public sealed class TransferOrchestratorTests : IDisposable
         public Task ReportFailureAsync(Guid serverSessionId, string code, string message, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
+    private sealed class FakeManagedSlotStore : IManagedSlotStore
+    {
+        private ManagedSlotBinding? _binding;
+        public int WriteCalls { get; private set; }
+
+        public Task<ManagedSlotBinding?> ReadAsync(CancellationToken cancellationToken = default) => Task.FromResult(_binding);
+
+        public Task WriteAsync(ManagedSlotBinding binding, CancellationToken cancellationToken = default)
+        {
+            _binding = binding;
+            WriteCalls++;
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class FakeAdapter(string root) : IGameSaveAdapter
     {
         public string Id => "fake";
@@ -355,6 +502,35 @@ public sealed class TransferOrchestratorTests : IDisposable
         public int BaselineCalls { get; private set; }
         public int ImportCalls { get; private set; }
         public bool GameRunning { get; set; }
+        public int ManagedSlotBaselineCalls { get; private set; }
+        public int ManagedSlotReplaceCalls { get; private set; }
+        public int ManagedSlotReconcileCalls { get; private set; }
+        public bool ManagedSlotReplaceSucceeds { get; set; } = true;
+        public ManagedSlotReconciliationState ManagedSlotReconcileState { get; set; } = ManagedSlotReconciliationState.PreviousPayloadPresent;
+
+        public Task<ManagedSlotBaselineResult> CreateManagedSlotBaselineAsync(ManagedSlotReference slot, string outputRoot, CancellationToken cancellationToken = default)
+        {
+            ManagedSlotBaselineCalls++;
+            var path = Path.Combine(outputRoot, "managed-slot-baseline");
+            Directory.CreateDirectory(path);
+            return Task.FromResult(new ManagedSlotBaselineResult(true, path, null, []));
+        }
+
+        public Task<PortableImportResult> ReplaceManagedSlotAsync(PortableSaveArtifact artifact, string baselineDirectory, ManagedSlotReference slot, string expectedPlayerName, string preImportBackupOutputRoot, CancellationToken cancellationToken = default)
+        {
+            ManagedSlotReplaceCalls++;
+            if (!ManagedSlotReplaceSucceeds)
+            {
+                return Task.FromResult(new PortableImportResult(false, slot.LogicalName, slot.CurrentDisplayName, Path.Combine(root, "snapshot"), "previous-sha", null, ["guard"]));
+            }
+            return Task.FromResult(new PortableImportResult(true, slot.LogicalName, slot.DesiredDisplayName, Path.Combine(root, "snapshot"), "previous-sha", "payload-sha", []));
+        }
+
+        public Task<ManagedSlotReconciliationResult> ReconcileManagedSlotReplacementAsync(PortableSaveArtifact artifact, string baselineDirectory, ManagedSlotReference slot, string expectedPlayerName, CancellationToken cancellationToken = default)
+        {
+            ManagedSlotReconcileCalls++;
+            return Task.FromResult(new ManagedSlotReconciliationResult(ManagedSlotReconcileState, slot.LogicalName, "current-sha", "payload-sha", []));
+        }
 
         public Task<InstallationDetection> DetectInstallationAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<LocalStorageInspection> InspectLocalStorageAsync(CancellationToken cancellationToken = default)
