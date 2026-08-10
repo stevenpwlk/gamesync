@@ -14,6 +14,9 @@ public sealed class AuthenticatedTransferServerClient(
     DeviceIdentity identity,
     ClientStateStore stateStore) : ITransferServerClient, IDisposable
 {
+    public const string ClientVersionHeaderName = "X-GameSaveHub-Client-Version";
+    public const string ClientVersion = "0.4.0";
+
     private readonly Uri _baseUri = new(options.Value.ServerBaseUrl, UriKind.Absolute);
     private readonly SemaphoreSlim _tokenGate = new(1, 1);
     private string? _accessToken;
@@ -43,13 +46,14 @@ public sealed class AuthenticatedTransferServerClient(
     public async Task<AcquireWorldResponse> AcquireWorldAsync(
         Guid worldId,
         Guid? expectedVersionId,
+        string playerName,
         string idempotencyKey,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(idempotencyKey);
         using var request = new HttpRequestMessage(HttpMethod.Post, Api($"worlds/{worldId:D}/acquire"))
         {
-            Content = JsonContent.Create(new AcquireWorldRequest(expectedVersionId))
+            Content = JsonContent.Create(new AcquireWorldRequest(expectedVersionId, playerName))
         };
         request.Headers.Add("Idempotency-Key", idempotencyKey);
         using var response = await SendAuthorizedAsync(request, cancellationToken);
@@ -168,6 +172,7 @@ public sealed class AuthenticatedTransferServerClient(
         HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead)
     {
         EnsureMutationIdempotency(request);
+        request.Headers.Add(ClientVersionHeaderName, ClientVersion);
         var token = await GetAccessTokenAsync(cancellationToken);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return await http.SendAsync(request, completionOption, cancellationToken);

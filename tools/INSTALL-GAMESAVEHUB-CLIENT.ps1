@@ -88,11 +88,16 @@ $config = @{
         ServerBaseUrl = $ServerBaseUrl
         StatePath = "%ProgramData%\GameSaveHub\client-state.json"
         TransferRootPath = "%ProgramData%\GameSaveHub\transfers"
+        ManagedSlotStatePath = "%ProgramData%\GameSaveHub\managed-slot.json"
         CngKeyName = "GameSaveHub.DeviceIdentity"
         EnableWgsTransfer = [bool]$EnableWgsTransfer
     }
 }
 $config | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+# Lu en diagnostic uniquement : jamais son nom logique, qui n'est jamais affiche a l'utilisateur.
+$managedSlotPath = Join-Path $programDataRoot "managed-slot.json"
+$managedSlotAlreadyBound = Test-Path -LiteralPath $managedSlotPath
 
 $serviceExe = Join-Path $serviceRoot "GameSaveHub.Client.Service.exe"
 $appExe = Join-Path $appRoot "GameSaveHub.Client.App.exe"
@@ -133,6 +138,13 @@ if ($EnableWgsTransfer) {
 else {
     Write-Host "Écriture des sauvegardes : DÉSACTIVÉE (EnableWgsTransfer=false)" -ForegroundColor Green
     Write-Host "Ce PC peut enrôler, lire le catalogue et vérifier la compatibilité, sans rien écrire."
+}
+
+if ($managedSlotAlreadyBound) {
+    Write-Host "Slot local permanent : déjà enregistré sur ce PC (conservé lors de cette installation)."
+}
+else {
+    Write-Host "Slot local permanent : pas encore configuré. L'application proposera la configuration initiale."
 }
 
 # Un changement d'état du verrou n'est jamais anodin : il décide si ce PC peut, ou

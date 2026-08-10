@@ -42,6 +42,7 @@ public sealed class SessionEntity
     public Guid Id { get; set; }
     public Guid WorldId { get; set; }
     public Guid DeviceId { get; set; }
+    public string? PlayerName { get; set; }
     public Guid? BaseVersionId { get; set; }
     public WorldSessionState State { get; set; }
     public bool ImportStarted { get; set; }

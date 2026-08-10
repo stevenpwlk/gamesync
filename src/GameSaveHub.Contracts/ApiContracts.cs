@@ -7,8 +7,29 @@ public sealed record AuthChallengeRequest(Guid DeviceId);
 public sealed record AuthChallengeResponse(Guid ChallengeId, string Nonce, DateTimeOffset ExpiresAtUtc);
 public sealed record AuthTokenRequest(Guid DeviceId, Guid ChallengeId, string Signature);
 public sealed record AuthTokenResponse(string AccessToken, DateTimeOffset ExpiresAtUtc);
-public sealed record WorldStatusResponse(Guid WorldId, string Name, string Status, Guid? CurrentVersionId, Guid? ActiveSessionId);
-public sealed record AcquireWorldRequest(Guid? ExpectedVersionId);
+public sealed record ActiveWorldSessionResponse(
+    Guid SessionId,
+    Guid DeviceId,
+    string? PlayerName,
+    string State,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset LastHeartbeatAtUtc);
+
+public sealed record WorldLastActivityResponse(
+    Guid VersionId,
+    string? PlayerName,
+    DateTimeOffset PublishedAtUtc);
+
+public sealed record WorldStatusResponse(
+    Guid WorldId,
+    string Name,
+    string Status,
+    Guid? CurrentVersionId,
+    Guid? ActiveSessionId,
+    ActiveWorldSessionResponse? ActiveSession = null,
+    WorldLastActivityResponse? LastActivity = null);
+
+public sealed record AcquireWorldRequest(Guid? ExpectedVersionId, string? PlayerName = null);
 public sealed record AcquireWorldResponse(Guid SessionId, Guid? CurrentVersionId, string State);
 public sealed record SessionHeartbeatRequest(string ClientState);
 public sealed record CreateUploadRequest(long Length, string Sha256, Guid? BaseVersionId, int ChunkSize);

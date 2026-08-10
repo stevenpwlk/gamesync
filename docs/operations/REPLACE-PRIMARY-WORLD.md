@@ -2,6 +2,8 @@
 
 Cette procédure est administrative. Elle ne doit être exécutée qu'après validation du fichier reçu et autorisation explicite pour chaque copie ou opération sur le NAS.
 
+**Validée réellement le 10 août 2026 :** procédure exécutée de bout en bout pour remplacer `Shlags1` par une nouvelle sauvegarde reçue de Bob (nouveau monde, `Standard-1.json` chez lui, seed différent — remplacement volontaire, pas une erreur). Sauvegarde SQLite + objets prise avant écriture, fichier copié et vérifié par hash (`sha256:291a176d...`), `world replace` exécuté avec `--source-player "BoB XiMe" --require-player "Stevenpwlk"`, nouvelle version créée et confirmée par `storage verify`/`world list`/`version list`, ancienne version conservée dans l'historique. **Point important découvert à cette occasion :** l'image admin réellement déployée sur le NAS (`gamesavehub-admin:0.1.0`) n'avait pas encore la commande `world replace` — elle a dû être reconstruite depuis les sources courantes (`docker build -f src/GameSaveHub.Server.Admin/Dockerfile`, taguée `gamesavehub-admin:0.1.1`) avant de pouvoir l'utiliser. `scp` ne fonctionne pas sur ce NAS (sous-système désactivé) ; utiliser `cat fichier | ssh ... 'cat > destination'` à la place.
+
 ## 1. Export chez Bob
 
 Bob ferme complètement The Planet Crafter, lance `GameSaveHub.SaveExporter.exe`, choisit la sauvegarde à l'aide des joueurs et de la date, puis sélectionne un dossier de destination.

@@ -1,5 +1,12 @@
 namespace GameSaveHub.Client.Orchestration;
 
+public enum TransferFlowKind
+{
+    LegacyPlaceholder,
+    InitialSlotSetup,
+    ManagedSlotReuse
+}
+
 public enum TransferStage
 {
     Initialized,
@@ -68,11 +75,15 @@ public sealed record TransferSession(
     IReadOnlyList<int> ConfirmedChunks,
     Guid? ResultVersionId,
     string? LastErrorCode,
-    string? LastErrorMessage)
+    string? LastErrorMessage,
+    TransferFlowKind FlowKind = TransferFlowKind.LegacyPlaceholder,
+    string? ManagedSlotCurrentDisplayName = null,
+    string? ManagedSlotDesiredDisplayName = null,
+    bool ManagedSlotBindingCommitted = false)
 {
     public const int CurrentSchemaVersion = 1;
 
-    public static TransferSession Create(Guid worldId, string playerName, DateTimeOffset now) => new(
+    public static TransferSession Create(Guid worldId, string playerName, DateTimeOffset now, TransferFlowKind flowKind = TransferFlowKind.LegacyPlaceholder) => new(
         CurrentSchemaVersion,
         Guid.NewGuid(),
         worldId,
@@ -106,7 +117,8 @@ public sealed record TransferSession(
         [],
         null,
         null,
-        null);
+        null,
+        flowKind);
 }
 
 public sealed record TransferOperationResult(

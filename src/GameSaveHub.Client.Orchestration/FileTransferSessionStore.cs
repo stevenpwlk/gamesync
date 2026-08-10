@@ -7,7 +7,9 @@ public sealed class FileTransferSessionStore(string rootPath) : ITransferSession
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private static readonly JsonSerializerOptions JournalJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private int _writesInFlight;
     public string RootPath { get; } = Path.GetFullPath(Environment.ExpandEnvironmentVariables(rootPath));
+    public bool IsWriteInProgress => Volatile.Read(ref _writesInFlight) > 0;
 
     public string GetSessionDirectory(Guid localSessionId) => Path.Combine(RootPath, localSessionId.ToString("D"));
 
@@ -72,6 +74,7 @@ public sealed class FileTransferSessionStore(string rootPath) : ITransferSession
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(eventName);
         await _gate.WaitAsync(cancellationToken);
+        Interlocked.Increment(ref _writesInFlight);
         try
         {
             var directory = GetSessionDirectory(session.LocalSessionId);
@@ -103,6 +106,7 @@ public sealed class FileTransferSessionStore(string rootPath) : ITransferSession
         }
         finally
         {
+            Interlocked.Decrement(ref _writesInFlight);
             _gate.Release();
         }
     }

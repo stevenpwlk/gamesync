@@ -7,7 +7,7 @@ public interface ITransferServerClient
     Task<IReadOnlyList<WorldCatalogItemResponse>> ListWorldsAsync(CancellationToken cancellationToken = default);
     Task<WorldPreviewResponse> GetWorldPreviewAsync(Guid worldId, CancellationToken cancellationToken = default);
     Task<WorldStatusResponse> GetWorldStatusAsync(Guid worldId, CancellationToken cancellationToken = default);
-    Task<AcquireWorldResponse> AcquireWorldAsync(Guid worldId, Guid? expectedVersionId, string idempotencyKey, CancellationToken cancellationToken = default);
+    Task<AcquireWorldResponse> AcquireWorldAsync(Guid worldId, Guid? expectedVersionId, string playerName, string idempotencyKey, CancellationToken cancellationToken = default);
     Task<ServerArtifactDownload> DownloadSessionArtifactAsync(Guid serverSessionId, string destinationPath, CancellationToken cancellationToken = default);
     Task MarkImportStartingAsync(Guid serverSessionId, CancellationToken cancellationToken = default);
     Task HeartbeatAsync(Guid serverSessionId, string clientState, CancellationToken cancellationToken = default);

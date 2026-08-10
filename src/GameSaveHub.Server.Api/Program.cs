@@ -18,6 +18,7 @@ builder.Configuration.AddKeyPerFile("/run/secrets", optional: true);
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.Configure<AuthenticationOptions>(builder.Configuration.GetSection("Authentication"));
 builder.Services.Configure<FeatureGateOptions>(builder.Configuration.GetSection("FeatureGates"));
+builder.Services.Configure<ClientCompatibilityOptions>(builder.Configuration.GetSection("ClientCompatibility"));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ImmutableArtifactStore>();
 builder.Services.AddDbContext<GameSaveHubDbContext>(options =>
@@ -303,7 +304,30 @@ protectedApi.MapGet("/worlds/{id:guid}/status", async (Guid id, GameSaveHubDbCon
     var world = await db.Worlds.FindAsync([id], cancellationToken);
     if (world is null) return Error(context, 404, "world_not_found", "Monde introuvable.");
     var session = await db.Sessions.SingleOrDefaultAsync(x => x.WorldId == id && x.ReleasedAtUtc == null, cancellationToken);
-    return Results.Ok(new WorldStatusResponse(world.Id, world.Name, session?.State.ToString() ?? "Available", world.CurrentVersionId, session?.Id));
+    SaveVersionEntity? currentVersion = null;
+    if (world.CurrentVersionId is Guid currentVersionId)
+        currentVersion = await db.SaveVersions.FindAsync([currentVersionId], cancellationToken);
+    return Results.Ok(new WorldStatusResponse(
+        world.Id,
+        world.Name,
+        session?.State.ToString() ?? "Available",
+        world.CurrentVersionId,
+        session?.Id,
+        session is null
+            ? null
+            : new ActiveWorldSessionResponse(
+                session.Id,
+                session.DeviceId,
+                session.PlayerName,
+                session.State.ToString(),
+                session.CreatedAtUtc,
+                session.LastHeartbeatAtUtc),
+        currentVersion is null
+            ? null
+            : new WorldLastActivityResponse(
+                currentVersion.Id,
+                currentVersion.PublishedByPlayerName,
+                currentVersion.CreatedAtUtc)));
 });
 
 protectedApi.MapPost("/worlds/{id:guid}/acquire", async (
@@ -311,10 +335,14 @@ protectedApi.MapPost("/worlds/{id:guid}/acquire", async (
     AcquireWorldRequest request,
     GameSaveHubDbContext db,
     IOptions<FeatureGateOptions> gates,
+    IOptions<ClientCompatibilityOptions> compatibility,
     TimeProvider clock,
     HttpContext context,
     CancellationToken cancellationToken) =>
 {
+    var clientVersion = context.Request.Headers["X-GameSaveHub-Client-Version"].ToString();
+    if (!ClientCompatibilityPolicy.CanAcquire(clientVersion, compatibility.Value.MinimumAcquireVersion))
+        return Error(context, 409, "client_update_required", "Une mise à jour de GameSave Hub est nécessaire avant de prendre la main.");
     if (!gates.Value.AllowHostTransfer)
         return Error(context, 409, "host_transfer_not_validated", "Le transfert d'hôte reste bloqué par le feature gate de production.");
     if (!TryDeviceId(context.User, out var deviceId)) return Error(context, 401, "token_invalid", "Jeton d'appareil invalide.");
@@ -339,12 +367,51 @@ protectedApi.MapPost("/worlds/{id:guid}/acquire", async (
     if (await db.Sessions.AnyAsync(x => x.WorldId == id && x.ReleasedAtUtc == null, cancellationToken))
         return Error(context, 409, "world_locked", "Le monde est déjà verrouillé.");
 
+    string? canonicalPlayerName = null;
+    if (!string.IsNullOrWhiteSpace(request.PlayerName))
+    {
+        if (world.CurrentVersionId is not Guid versionId)
+            return Error(context, 409, "artifact_missing", "Le monde ne possède aucune sauvegarde courante.");
+        var version = await db.SaveVersions.FindAsync([versionId], cancellationToken);
+        if (version is null)
+            return Error(context, 409, "artifact_missing", "La version courante est introuvable.");
+        var artifactPath = context.RequestServices.GetRequiredService<ImmutableArtifactStore>().GetObjectPath(version.Sha256);
+        if (!File.Exists(artifactPath))
+            return Error(context, 409, "artifact_missing", "L'artefact courant est absent.");
+        var storageOptions = context.RequestServices.GetRequiredService<IOptions<StorageOptions>>().Value;
+        ArtifactEnvelopeSummary summary;
+        try
+        {
+            summary = await ArtifactEnvelopeValidator.ReadSummaryAsync(
+                artifactPath,
+                storageOptions.MaxArtifactBytes,
+                cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            return Error(context, 409, "artifact_invalid", "L'artefact courant est invalide.");
+        }
+
+        var identity = AcquisitionPlayerIdentityResolver.Resolve(
+            request.PlayerName,
+            summary.Players.Select(player => new WorldPreviewPlayerResponse(
+                player.Id,
+                player.Name,
+                player.IsHost,
+                player.InventoryId,
+                player.EquipmentId)).ToArray());
+        if (!identity.Success)
+            return Error(context, 409, identity.Code, identity.Message);
+        canonicalPlayerName = identity.CanonicalPlayerName;
+    }
+
     var now = clock.GetUtcNow();
     var session = new SessionEntity
     {
         Id = Guid.NewGuid(),
         WorldId = id,
         DeviceId = deviceId,
+        PlayerName = canonicalPlayerName,
         BaseVersionId = world.CurrentVersionId,
         State = WorldSessionState.Preparing,
         LastClientState = "acquired",
@@ -503,7 +570,8 @@ protectedApi.MapPost("/uploads/{id:guid}/commit", async (Guid id, GameSaveHubDbC
         Sha256 = upload.Sha256,
         Length = upload.Length,
         StorageKey = upload.Sha256,
-        CreatedAtUtc = now
+        CreatedAtUtc = now,
+        PublishedByPlayerName = session.PlayerName
     };
     db.SaveVersions.Add(version);
     world.CurrentVersionId = version.Id;

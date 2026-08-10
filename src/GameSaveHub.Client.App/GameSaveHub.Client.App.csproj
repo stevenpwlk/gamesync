@@ -9,5 +9,9 @@
     <!-- Pour TransferStage / TransferSession / TransferWizardPresenter : l'écran est
          un rendu de ce que décrit le présentateur, il ne réimplémente pas ses règles. -->
     <ProjectReference Include="..\GameSaveHub.Client.Orchestration\GameSaveHub.Client.Orchestration.csproj" />
+    <ProjectReference Include="..\GameSaveHub.Adapters.PlanetCrafter.GamePass\GameSaveHub.Adapters.PlanetCrafter.GamePass.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets\planet-panorama.png" />
   </ItemGroup>
 </Project>

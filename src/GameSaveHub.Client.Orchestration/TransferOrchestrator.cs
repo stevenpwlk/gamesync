@@ -7,6 +7,7 @@ public sealed class TransferOrchestrator(
     IGameSaveAdapter adapter,
     ITransferServerClient server,
     ITransferSessionStore store,
+    IManagedSlotStore managedSlotStore,
     TimeProvider? timeProvider = null)
 {
     private const int DefaultUploadChunkSize = 4 * 1024 * 1024;
@@ -16,6 +17,7 @@ public sealed class TransferOrchestrator(
     public async Task<TransferOperationResult> StartAsync(
         Guid worldId,
         string playerName,
+        TransferFlowKind flowKind = TransferFlowKind.LegacyPlaceholder,
         CancellationToken cancellationToken = default)
     {
         if (worldId == Guid.Empty) return Failure("world_required", "L'identifiant du monde est obligatoire.", null);
@@ -31,7 +33,26 @@ public sealed class TransferOrchestrator(
             return Failure("active_session_exists", $"Une session locale est déjà active : {active[0].LocalSessionId:D}.", active[0]);
         }
 
-        var session = TransferSession.Create(worldId, playerName.Trim(), _clock.GetUtcNow());
+        ManagedSlotBinding? binding = null;
+        if (flowKind == TransferFlowKind.ManagedSlotReuse)
+        {
+            binding = await managedSlotStore.ReadAsync(cancellationToken);
+            if (binding is null)
+            {
+                return Failure("managed_slot_binding_missing", "Aucun slot géré n'est enregistré pour une réutilisation.", null);
+            }
+        }
+
+        var session = TransferSession.Create(worldId, playerName.Trim(), _clock.GetUtcNow(), flowKind);
+        if (binding is not null)
+        {
+            session = session with
+            {
+                TargetLogicalName = binding.LogicalName,
+                ManagedSlotCurrentDisplayName = binding.CurrentDisplayName,
+                ManagedSlotDesiredDisplayName = binding.DesiredDisplayName
+            };
+        }
         session = await PersistAsync(session, "session-created", cancellationToken);
         return await AdvancePreparationAsync(session, cancellationToken);
     }
@@ -214,7 +235,12 @@ public sealed class TransferOrchestrator(
                 if (session.ServerSessionId is null)
                 {
                     var status = await server.GetWorldStatusAsync(session.WorldId, cancellationToken);
-                    var acquired = await server.AcquireWorldAsync(session.WorldId, status.CurrentVersionId, session.AcquireIdempotencyKey, cancellationToken);
+                    var acquired = await server.AcquireWorldAsync(
+                        session.WorldId,
+                        status.CurrentVersionId,
+                        session.PlayerName,
+                        session.AcquireIdempotencyKey,
+                        cancellationToken);
                     session = await PersistAsync(session with
                     {
                         ServerSessionId = acquired.SessionId,
@@ -272,13 +298,19 @@ public sealed class TransferOrchestrator(
                 if (session.PreparedArtifactPath is null || !File.Exists(session.PreparedArtifactPath))
                 {
                     var preparedRoot = Path.Combine(store.GetSessionDirectory(session.LocalSessionId), "prepared");
-                    var preparation = await adapter.PrepareForHostAsync(source, session.PlayerName, preparedRoot, cancellationToken);
+                    var preparation = await adapter.PrepareForHostAsync(
+                        source,
+                        session.PlayerName,
+                        ManagedSlotResolver.PermanentDisplayName,
+                        preparedRoot,
+                        cancellationToken);
                     if (!preparation.Success || preparation.PreparedArtifact is null)
                     {
                         var code = preparation.Outcome switch
                         {
                             HostPreparationOutcome.PlayerNotFound => "player_not_found",
                             HostPreparationOutcome.PlayerAmbiguous => "player_ambiguous",
+                            HostPreparationOutcome.InvalidDisplayName => "invalid_target_display_name",
                             HostPreparationOutcome.InvalidPlayerTopology => "player_topology_invalid",
                             HostPreparationOutcome.InvalidArtifact => "artifact_invalid",
                             _ => "host_preparation_failed"
@@ -305,6 +337,35 @@ public sealed class TransferOrchestrator(
                 {
                     return await FailBeforeImportAsync(session, "prepared_artifact_missing", "L'artefact préparé a disparu.", cancellationToken);
                 }
+
+                if (session.FlowKind == TransferFlowKind.ManagedSlotReuse)
+                {
+                    if (session.TargetLogicalName is null || session.ManagedSlotCurrentDisplayName is null || session.ManagedSlotDesiredDisplayName is null)
+                    {
+                        return await ManualReviewAsync(session, "managed_slot_binding_incomplete", "Le slot géré référencé est incomplet.", cancellationToken);
+                    }
+                    if (session.BaselineDirectory is null || !Directory.Exists(session.BaselineDirectory))
+                    {
+                        var baselineRoot = Path.Combine(store.GetSessionDirectory(session.LocalSessionId), "safety", "managed-slot-baselines");
+                        var slot = new ManagedSlotReference(session.TargetLogicalName, session.ManagedSlotCurrentDisplayName, session.ManagedSlotDesiredDisplayName);
+                        var managedBaseline = await adapter.CreateManagedSlotBaselineAsync(slot, baselineRoot, cancellationToken);
+                        if (!managedBaseline.Success || managedBaseline.BaselineDirectory is null)
+                        {
+                            return await FailBeforeImportAsync(session, "managed_slot_baseline_failed", string.Join("; ", managedBaseline.Errors), cancellationToken);
+                        }
+                        session = await PersistAsync(session with
+                        {
+                            BaselineDirectory = managedBaseline.BaselineDirectory,
+                            Stage = TransferStage.Importing
+                        }, "managed-slot-baseline-created", cancellationToken);
+                    }
+                    else
+                    {
+                        session = await PersistAsync(session with { Stage = TransferStage.Importing }, "managed-slot-baseline-already-checkpointed", cancellationToken);
+                    }
+                    return await PerformImportAsync(session, cancellationToken);
+                }
+
                 if (session.BaselineDirectory is null || !Directory.Exists(session.BaselineDirectory))
                 {
                     var baselineRoot = Path.Combine(store.GetSessionDirectory(session.LocalSessionId), "safety", "import-baselines");
@@ -316,7 +377,7 @@ public sealed class TransferOrchestrator(
                     session = await PersistAsync(session with
                     {
                         BaselineDirectory = baseline.BaselineDirectory,
-                        PlaceholderName = GeneratePlaceholderName(),
+                        PlaceholderName = session.FlowKind == TransferFlowKind.InitialSlotSetup ? ManagedSlotResolver.PermanentDisplayName : GeneratePlaceholderName(),
                         Stage = TransferStage.AwaitingPlaceholder
                     }, "baseline-created", cancellationToken);
                 }
@@ -324,7 +385,8 @@ public sealed class TransferOrchestrator(
                 {
                     session = await PersistAsync(session with
                     {
-                        PlaceholderName = session.PlaceholderName ?? GeneratePlaceholderName(),
+                        PlaceholderName = session.PlaceholderName ??
+                            (session.FlowKind == TransferFlowKind.InitialSlotSetup ? ManagedSlotResolver.PermanentDisplayName : GeneratePlaceholderName()),
                         Stage = TransferStage.AwaitingPlaceholder
                     }, "baseline-already-checkpointed", cancellationToken);
                 }
@@ -345,6 +407,11 @@ public sealed class TransferOrchestrator(
 
     private async Task<TransferOperationResult> PerformImportAsync(TransferSession session, CancellationToken cancellationToken)
     {
+        if (session.FlowKind == TransferFlowKind.ManagedSlotReuse)
+        {
+            return await PerformManagedSlotReplacementAsync(session, cancellationToken);
+        }
+
         if (session.ServerSessionId is not Guid serverSessionId || session.PreparedArtifactPath is not string preparedArtifactPath ||
             session.BaselineDirectory is not string baselineDirectory || session.PlaceholderName is not string placeholderName)
         {
@@ -394,6 +461,7 @@ public sealed class TransferOrchestrator(
                 LastErrorCode = null,
                 LastErrorMessage = null
             }, "import-completed", cancellationToken);
+            session = await CommitManagedSlotBindingIfNeededAsync(session, cancellationToken);
             await TryHeartbeatAsync(session, "ready-to-play", cancellationToken);
             return Success("ready_to_play", $"Import validé dans {session.TargetLogicalName}. Lancez Planet Crafter manuellement et ouvrez uniquement le monde importé.", session);
         }
@@ -412,6 +480,11 @@ public sealed class TransferOrchestrator(
 
     private async Task<TransferOperationResult> RecoverImportAsync(TransferSession session, bool allowRetry, CancellationToken cancellationToken)
     {
+        if (session.FlowKind == TransferFlowKind.ManagedSlotReuse)
+        {
+            return await RecoverManagedSlotReuseAsync(session, allowRetry, cancellationToken);
+        }
+
         if (session.PreparedArtifactPath is null || session.BaselineDirectory is null || session.TargetLogicalName is null ||
             session.PlaceholderPayloadSha256 is null)
         {
@@ -440,6 +513,7 @@ public sealed class TransferOrchestrator(
                 LastErrorCode = null,
                 LastErrorMessage = null
             }, "import-reconciled-as-complete", cancellationToken);
+            session = await CommitManagedSlotBindingIfNeededAsync(session, cancellationToken);
             await TryHeartbeatAsync(session, "ready-to-play-recovered", cancellationToken);
             return Success("ready_to_play", "L'import avait déjà été effectué avant l'interruption. Aucune nouvelle écriture WGS n'a été faite.", session);
         }
@@ -465,6 +539,164 @@ public sealed class TransferOrchestrator(
             "import_reconciliation_failed",
             string.Join("; ", reconciliation.Errors.DefaultIfEmpty($"État de réconciliation : {reconciliation.State}.")),
             cancellationToken);
+    }
+
+    private async Task<TransferOperationResult> PerformManagedSlotReplacementAsync(TransferSession session, CancellationToken cancellationToken)
+    {
+        if (session.ServerSessionId is not Guid serverSessionId || session.PreparedArtifactPath is not string preparedArtifactPath ||
+            session.BaselineDirectory is not string baselineDirectory || session.TargetLogicalName is not string targetLogicalName ||
+            session.ManagedSlotCurrentDisplayName is not string currentDisplayName || session.ManagedSlotDesiredDisplayName is not string desiredDisplayName)
+        {
+            return await ManualReviewAsync(session, "managed_slot_checkpoint_incomplete", "Le checkpoint de réutilisation du slot géré est incomplet.", cancellationToken);
+        }
+
+        try
+        {
+            if (!session.ServerImportStarted)
+            {
+                await server.MarkImportStartingAsync(serverSessionId, cancellationToken);
+                session = await PersistAsync(session with { ServerImportStarted = true }, "server-import-started", cancellationToken);
+            }
+
+            var artifact = ArtifactFromPath(preparedArtifactPath);
+            var backupRoot = Path.Combine(store.GetSessionDirectory(session.LocalSessionId), "safety", "pre-import");
+            var slot = new ManagedSlotReference(targetLogicalName, currentDisplayName, desiredDisplayName);
+            var replace = await adapter.ReplaceManagedSlotAsync(artifact, baselineDirectory, slot, session.PlayerName, backupRoot, cancellationToken);
+            if (!replace.Success)
+            {
+                var message = string.Join("; ", replace.Errors);
+                await TryReportFailureAsync(session, "managed_slot_replacement_failed", message, cancellationToken);
+                session = await PersistAsync(session with
+                {
+                    Stage = TransferStage.Interrupted,
+                    ResumeStage = TransferStage.Importing,
+                    PreImportSnapshotDirectory = replace.PreImportSnapshotDirectory,
+                    LastErrorCode = "managed_slot_replacement_failed",
+                    LastErrorMessage = message
+                }, "managed-slot-replacement-interrupted", cancellationToken);
+                return Failure("managed_slot_replacement_failed", message, session);
+            }
+
+            session = await PersistAsync(session with
+            {
+                Stage = TransferStage.ReadyToPlay,
+                ResumeStage = null,
+                TargetDisplayName = replace.TargetDisplayName,
+                PreImportSnapshotDirectory = replace.PreImportSnapshotDirectory,
+                ImportedPayloadSha256 = replace.ImportedPayloadSha256,
+                LastErrorCode = null,
+                LastErrorMessage = null
+            }, "managed-slot-replaced", cancellationToken);
+            await SyncManagedSlotBindingDisplayNameAsync(session, cancellationToken);
+            await TryHeartbeatAsync(session, "ready-to-play", cancellationToken);
+            return Success("ready_to_play", $"Le slot {ManagedSlotResolver.PermanentDisplayName} a été mis à jour. Lancez Planet Crafter manuellement et ouvrez uniquement ce monde.", session);
+        }
+        catch (TransferServerException exception)
+        {
+            session = await PersistAsync(session with
+            {
+                Stage = TransferStage.Interrupted,
+                ResumeStage = TransferStage.Importing,
+                LastErrorCode = exception.Code,
+                LastErrorMessage = exception.Message
+            }, "managed-slot-server-interrupted", cancellationToken);
+            return Failure(exception.Code, exception.Message, session);
+        }
+    }
+
+    private async Task<TransferOperationResult> RecoverManagedSlotReuseAsync(TransferSession session, bool allowRetry, CancellationToken cancellationToken)
+    {
+        if (session.PreparedArtifactPath is null || session.BaselineDirectory is null || session.TargetLogicalName is null ||
+            session.ManagedSlotCurrentDisplayName is null || session.ManagedSlotDesiredDisplayName is null)
+        {
+            return await ManualReviewAsync(session, "reconcile_checkpoint_incomplete", "Impossible de réconcilier la réutilisation du slot géré : checkpoint incomplet.", cancellationToken);
+        }
+        if (!File.Exists(session.PreparedArtifactPath))
+        {
+            return await ManualReviewAsync(session, "prepared_artifact_missing", "L'artefact préparé n'existe plus.", cancellationToken);
+        }
+
+        var slot = new ManagedSlotReference(session.TargetLogicalName, session.ManagedSlotCurrentDisplayName, session.ManagedSlotDesiredDisplayName);
+        var reconciliation = await adapter.ReconcileManagedSlotReplacementAsync(
+            ArtifactFromPath(session.PreparedArtifactPath),
+            session.BaselineDirectory,
+            slot,
+            session.PlayerName,
+            cancellationToken);
+
+        if (reconciliation.State == ManagedSlotReconciliationState.ImportedPayloadPresent)
+        {
+            session = await PersistAsync(session with
+            {
+                Stage = TransferStage.ReadyToPlay,
+                ResumeStage = null,
+                ImportedPayloadSha256 = reconciliation.ExpectedImportedPayloadSha256,
+                LastErrorCode = null,
+                LastErrorMessage = null
+            }, "managed-slot-reconciled-as-complete", cancellationToken);
+            await SyncManagedSlotBindingDisplayNameAsync(session, cancellationToken);
+            await TryHeartbeatAsync(session, "ready-to-play-recovered", cancellationToken);
+            return Success("ready_to_play", "La réutilisation du slot avait déjà été effectuée avant l'interruption. Aucune nouvelle écriture WGS n'a été faite.", session);
+        }
+
+        if (reconciliation.State == ManagedSlotReconciliationState.PreviousPayloadPresent)
+        {
+            if (allowRetry)
+            {
+                return await PerformManagedSlotReplacementAsync(session with { Stage = TransferStage.Importing }, cancellationToken);
+            }
+            session = await PersistAsync(session with
+            {
+                Stage = TransferStage.Interrupted,
+                ResumeStage = TransferStage.Importing,
+                LastErrorCode = "managed_slot_not_written",
+                LastErrorMessage = "Le contenu précédent du slot est intact. Une reprise explicite peut retenter le remplacement."
+            }, "managed-slot-reconciled-previous-intact", cancellationToken);
+            return Failure("managed_slot_not_written", "Le contenu précédent est intact. Utilisez Reprendre pour retenter le remplacement explicitement.", session);
+        }
+
+        return await ManualReviewAsync(
+            session,
+            "managed_slot_reconciliation_failed",
+            string.Join("; ", reconciliation.Errors.DefaultIfEmpty($"État de réconciliation : {reconciliation.State}.")),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Après un remplacement réussi (immédiat ou reconnu par reprise), le nom affiché WGS
+    /// vaut désormais <see cref="TransferSession.ManagedSlotDesiredDisplayName"/>. Sans mettre
+    /// à jour le binding persistant en conséquence, la prochaine réutilisation le comparerait
+    /// à l'ancien nom courant et échouerait systématiquement dès la deuxième prise en main.
+    /// </summary>
+    private async Task SyncManagedSlotBindingDisplayNameAsync(TransferSession session, CancellationToken cancellationToken)
+    {
+        if (session.ManagedSlotDesiredDisplayName is not string desiredDisplayName) return;
+        var binding = await managedSlotStore.ReadAsync(cancellationToken);
+        if (binding is null || binding.CurrentDisplayName.Equals(desiredDisplayName, StringComparison.Ordinal)) return;
+        await managedSlotStore.WriteAsync(
+            binding with { CurrentDisplayName = desiredDisplayName, LastValidatedAtUtc = _clock.GetUtcNow() },
+            cancellationToken);
+    }
+
+    private async Task<TransferSession> CommitManagedSlotBindingIfNeededAsync(TransferSession session, CancellationToken cancellationToken)
+    {
+        if (session.FlowKind != TransferFlowKind.InitialSlotSetup || session.ManagedSlotBindingCommitted || session.TargetLogicalName is null)
+        {
+            return session;
+        }
+
+        var inspection = await adapter.InspectLocalStorageAsync(cancellationToken);
+        var binding = ManagedSlotBinding.Create(
+            adapter.Id,
+            inspection.PackageFamilyName,
+            session.PlayerName,
+            session.TargetLogicalName,
+            session.TargetDisplayName ?? ManagedSlotResolver.PermanentDisplayName,
+            ManagedSlotResolver.PermanentDisplayName,
+            _clock.GetUtcNow());
+        await managedSlotStore.WriteAsync(binding, cancellationToken);
+
+        return await PersistAsync(session with { ManagedSlotBindingCommitted = true }, "managed-slot-binding-committed", cancellationToken);
     }
 
     private async Task<TransferOperationResult> CaptureAndPublishAsync(TransferSession session, CancellationToken cancellationToken)

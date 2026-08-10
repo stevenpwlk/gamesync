@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GameSave Hub — installation sur ton PC</title>
+<style>
+  :root {
+    --paper: #f2f4ee;
+    --paper-raised: #ffffff;
+    --ink: #1b2420;
+    --ink-soft: #4b554e;
+    --ink-faint: #7c8779;
+    --accent: #2f7a5c;
+    --accent-deep: #1f5b43;
+    --accent-tint: #e3efe7;
+    --line: #dde1d2;
+    --warn-bg: #fbeee6;
+    --warn-ink: #8a3b1d;
+    --warn-accent: #b5502b;
+    --code-bg: #eceee3;
+    --shadow: 0 1px 2px rgba(27, 36, 32, 0.06), 0 6px 20px rgba(27, 36, 32, 0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #121814;
+      --paper-raised: #182019;
+      --ink: #e7ece3;
+      --ink-soft: #a9b3a4;
+      --ink-faint: #7c8779;
+      --accent: #4fae85;
+      --accent-deep: #6fc79e;
+      --accent-tint: #1c2c22;
+      --line: #2a332b;
+      --warn-bg: #2b1d14;
+      --warn-ink: #f3c7a9;
+      --warn-accent: #e08052;
+      --code-bg: #1c231c;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 24px rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #121814;
+    --paper-raised: #182019;
+    --ink: #e7ece3;
+    --ink-soft: #a9b3a4;
+    --ink-faint: #7c8779;
+    --accent: #4fae85;
+    --accent-deep: #6fc79e;
+    --accent-tint: #1c2c22;
+    --line: #2a332b;
+    --warn-bg: #2b1d14;
+    --warn-ink: #f3c7a9;
+    --warn-accent: #e08052;
+    --code-bg: #1c231c;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 24px rgba(0, 0, 0, 0.35);
+  }
+  :root[data-theme="light"] {
+    --paper: #f2f4ee;
+    --paper-raised: #ffffff;
+    --ink: #1b2420;
+    --ink-soft: #4b554e;
+    --ink-faint: #7c8779;
+    --accent: #2f7a5c;
+    --accent-deep: #1f5b43;
+    --accent-tint: #e3efe7;
+    --line: #dde1d2;
+    --warn-bg: #fbeee6;
+    --warn-ink: #8a3b1d;
+    --warn-accent: #b5502b;
+    --code-bg: #eceee3;
+    --shadow: 0 1px 2px rgba(27, 36, 32, 0.06), 0 6px 20px rgba(27, 36, 32, 0.05);
+  }
+
+  * { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 700px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+
+  header.masthead {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 8px;
+  }
+
+  .mark {
+    width: 44px;
+    height: 44px;
+    flex: none;
+    border-radius: 12px;
+    background: linear-gradient(155deg, var(--accent) 0%, var(--accent-deep) 100%);
+    position: relative;
+  }
+  .mark::before {
+    content: "";
+    position: absolute;
+    inset: 10px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.85);
+    border-right-color: transparent;
+    border-bottom-color: transparent;
+    transform: rotate(45deg);
+  }
+
+  .kicker {
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent-deep);
+  }
+
+  h1 {
+    margin: 4px 0 0;
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  .lede {
+    margin-top: 18px;
+    font-size: 17px;
+    color: var(--ink-soft);
+    max-width: 62ch;
+  }
+  .lede strong { color: var(--ink); }
+
+  .prereq {
+    margin-top: 32px;
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 24px;
+    box-shadow: var(--shadow);
+  }
+  .prereq h2 {
+    margin: 0 0 12px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+    font-weight: 700;
+  }
+  .prereq ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 10px;
+  }
+  .prereq li {
+    display: flex;
+    gap: 10px;
+    font-size: 15px;
+  }
+  .prereq li::before {
+    content: "";
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin-top: 7px;
+    border-radius: 2px;
+    background: var(--accent);
+    transform: rotate(45deg);
+  }
+  .pseudo {
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+    background: var(--code-bg);
+    padding: 1px 7px;
+    border-radius: 5px;
+    font-size: 0.95em;
+  }
+
+  .steps {
+    margin-top: 40px;
+    display: grid;
+    gap: 0;
+  }
+
+  .step {
+    position: relative;
+    display: grid;
+    grid-template-columns: 40px 1fr;
+    gap: 20px;
+    padding: 26px 0;
+    border-top: 1px solid var(--line);
+  }
+  .step:last-child { padding-bottom: 0; }
+
+  .step-num {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: var(--accent-tint);
+    color: var(--accent-deep);
+    font-weight: 800;
+    font-size: 17px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .step h3 {
+    margin: 6px 0 8px;
+    font-size: 19px;
+    font-weight: 750;
+    text-wrap: balance;
+  }
+
+  .step p { margin: 0 0 10px; color: var(--ink-soft); }
+  .step p:last-child { margin-bottom: 0; }
+  .step strong { color: var(--ink); font-weight: 650; }
+
+  .substeps {
+    margin: 12px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 10px;
+  }
+  .substeps li {
+    display: flex;
+    gap: 12px;
+    font-size: 15px;
+    color: var(--ink);
+    align-items: baseline;
+  }
+  .substeps .bullet {
+    flex: none;
+    width: 20px;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    padding-top: 3px;
+  }
+
+  .field-table {
+    margin-top: 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .field-row {
+    display: grid;
+    grid-template-columns: 1fr 1.4fr;
+    font-size: 14.5px;
+  }
+  .field-row + .field-row { border-top: 1px solid var(--line); }
+  .field-row div { padding: 10px 14px; }
+  .field-row .k {
+    background: var(--code-bg);
+    color: var(--ink-soft);
+    font-weight: 600;
+  }
+  .field-row .v code {
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+    font-size: 0.93em;
+  }
+
+  .callout {
+    margin-top: 14px;
+    background: var(--accent-tint);
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 14.5px;
+    color: var(--accent-deep);
+    display: flex;
+    gap: 10px;
+  }
+  .callout .glyph { flex: none; font-weight: 800; }
+
+  .finish {
+    margin-top: 44px;
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 24px 26px;
+    box-shadow: var(--shadow);
+  }
+  .finish h2 {
+    margin: 0 0 6px;
+    font-size: 19px;
+    font-weight: 750;
+  }
+  .finish p { color: var(--ink-soft); margin: 8px 0 0; }
+
+  .caution {
+    margin-top: 24px;
+    background: var(--warn-bg);
+    color: var(--warn-ink);
+    border-radius: 14px;
+    padding: 22px 24px;
+    display: flex;
+    gap: 16px;
+  }
+  .caution .glyph {
+    flex: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--warn-accent);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 16px;
+  }
+  .caution h2 { margin: 2px 0 6px; font-size: 16px; }
+  .caution p { margin: 0; font-size: 14.5px; }
+  .caution strong { color: inherit; }
+
+  footer {
+    margin-top: 40px;
+    text-align: center;
+    color: var(--ink-faint);
+    font-size: 13px;
+  }
+
+  @media (max-width: 520px) {
+    .step { grid-template-columns: 32px 1fr; gap: 14px; }
+    .step-num { width: 32px; height: 32px; font-size: 14px; border-radius: 8px; }
+    h1 { font-size: 25px; }
+    .field-row { grid-template-columns: 1fr; }
+    .field-row .k { border-bottom: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="masthead">
+    <div class="mark" aria-hidden="true"></div>
+    <div>
+      <div class="kicker">GameSave Hub</div>
+      <h1>Installer le monde partagé sur ton PC</h1>
+    </div>
+  </header>
+
+  <p class="lede">
+    Salut Bob ! Voici comment installer GameSave Hub pour rejoindre notre monde
+    <em>The Planet Crafter</em> commun. Prends ton temps, chaque étape est expliquée.
+    Si un écran ne correspond pas à ce qui est décrit ici,
+    <strong>arrête-toi et préviens Steven</strong> avant de continuer — rien de grave,
+    mais mieux vaut vérifier.
+  </p>
+
+  <section class="prereq">
+    <h2>Avant de commencer</h2>
+    <ul>
+      <li>The Planet Crafter est déjà installé sur ton PC via le Xbox Game Pass.</li>
+      <li>Tu es connecté sur <strong>ton propre compte Windows</strong>, celui avec lequel tu joues d'habitude.</li>
+      <li>The Planet Crafter est complètement fermé.</li>
+      <li>Tu as reçu de Steven : le fichier <code class="pseudo">GameSaveHub-Client-Lot2-0.4.0-PILOTE-win-x64.zip</code> et un code d'invitation.</li>
+      <li>Ton pseudo exact dans la sauvegarde commune est <span class="pseudo">BoB XiMe</span> — avec cette casse précise.</li>
+    </ul>
+  </section>
+
+  <div class="steps">
+
+    <article class="step">
+      <div class="step-num">1</div>
+      <div>
+        <h3>Extraire le fichier</h3>
+        <p>Clic droit sur le fichier ZIP reçu de Steven → <strong>« Extraire tout… »</strong>.
+        Tu obtiens un dossier nommé <code class="pseudo">GameSaveHub-Client-Lot2-0.4.0-PILOTE</code>.</p>
+      </div>
+    </article>
+
+    <article class="step">
+      <div class="step-num">2</div>
+      <div>
+        <h3>Installer</h3>
+        <ul class="substeps">
+          <li><span class="bullet">a</span><span>Ouvre le dossier extrait.</span></li>
+          <li><span class="bullet">b</span><span>Clic droit sur <strong>INSTALLER-GAMESAVEHUB-PILOTE.cmd</strong> → <strong>« Exécuter en tant qu'administrateur »</strong>.</span></li>
+          <li><span class="bullet">c</span><span>Windows te demande une confirmation (fenêtre bleue/grise) — accepte.</span></li>
+          <li><span class="bullet">d</span><span>Une fenêtre noire s'ouvre puis se termine sur <strong>« INSTALLATION RÉUSSIE »</strong>. Appuie sur une touche pour la fermer.</span></li>
+          <li><span class="bullet">e</span><span>GameSave Hub s'ouvre tout seul.</span></li>
+        </ul>
+        <div class="callout"><span class="glyph">!</span>Si une erreur s'affiche au lieu de « INSTALLATION RÉUSSIE », fais une capture d'écran et envoie-la à Steven sans réessayer plusieurs fois.</div>
+      </div>
+    </article>
+
+    <article class="step">
+      <div class="step-num">3</div>
+      <div>
+        <h3>S'enregistrer</h3>
+        <p>La première fenêtre te demande trois informations :</p>
+        <div class="field-table">
+          <div class="field-row"><div class="k">Nom de ce PC</div><div class="v">Peu importe, déjà pré-rempli</div></div>
+          <div class="field-row"><div class="k">Ton pseudo Planet Crafter</div><div class="v"><code>BoB XiMe</code> — exactement</div></div>
+          <div class="field-row"><div class="k">Code d'invitation</div><div class="v">Celui envoyé par Steven</div></div>
+        </div>
+        <p style="margin-top:14px">Clique sur <strong>Continuer</strong>.</p>
+      </div>
+    </article>
+
+    <article class="step">
+      <div class="step-num">4</div>
+      <div>
+        <h3>Configuration unique de ton PC</h3>
+        <p>C'est la seule fois où ces étapes seront nécessaires — deux lancements du jeu, l'un après l'autre.</p>
+        <ul class="substeps">
+          <li><span class="bullet">a</span><span>L'accueil affiche <strong>« Configurons ce PC »</strong>. Clique sur <strong>Configurer ce PC</strong>.</span></li>
+          <li><span class="bullet">b</span><span>L'écran passe à <strong>« Configuration unique — étape 1 sur 2 »</strong>. Clique sur <strong>Copier le nom</strong> (un texte « Copié » apparaît brièvement).</span></li>
+          <li><span class="bullet">c</span><span>Clique sur <strong>Lancer The Planet Crafter</strong>.</span></li>
+          <li><span class="bullet">d</span><span>Dans le jeu, crée un <strong>nouveau monde</strong>. Pour son nom, colle celui copié (<code class="pseudo">Ctrl+V</code>) — il doit être identique, ne le modifie pas.</span></li>
+          <li><span class="bullet">e</span><span>Entre une fois dans ce monde, puis <strong>sauvegarde et ferme complètement</strong> The Planet Crafter (quitte le jeu entièrement, pas juste réduire la fenêtre).</span></li>
+          <li><span class="bullet">f</span><span>Reviens sur GameSave Hub : il affiche <strong>« Installation du monde partagé… »</strong> puis <strong>« Configuration unique — étape 2 sur 2 »</strong>.</span></li>
+          <li><span class="bullet">g</span><span>Clique de nouveau sur <strong>Lancer The Planet Crafter</strong>. Le monde qui s'ouvre cette fois contient déjà la dernière sauvegarde commune — normal, c'est fait pour ça.</span></li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="step">
+      <div class="step-num">5</div>
+      <div>
+        <h3>Au quotidien, ensuite</h3>
+        <p><strong>Pour prendre la main</strong> (récupérer la dernière version et jouer) : ouvre GameSave Hub, clique sur <strong>Prendre la main</strong>, attends <strong>« Tout est prêt pour jouer »</strong>, puis <strong>Lancer The Planet Crafter</strong>. Joue, sauvegarde, ferme complètement le jeu — la publication se fait automatiquement.</p>
+        <p><strong>Pour rejoindre quelqu'un qui héberge déjà</strong> : GameSave Hub te le montre à l'accueil et propose de lancer le jeu ; rejoins depuis le menu multijoueur, comme d'habitude.</p>
+      </div>
+    </article>
+
+  </div>
+
+  <div class="caution">
+    <div class="glyph">?</div>
+    <div>
+      <h2>En cas de doute</h2>
+      <p>Rien de tout ça ne modifie ta sauvegarde tant que tu n'as pas cliqué sur un bouton.
+      Si un écran ne correspond pas à ce guide, ou qu'un message d'erreur apparaît,
+      <strong>arrête-toi, fais une capture d'écran, et préviens Steven</strong> avant de recommencer.</p>
+    </div>
+  </div>
+
+  <footer>GameSave Hub · monde partagé The Planet Crafter</footer>
+
+</div>
+</body>
+</html>
