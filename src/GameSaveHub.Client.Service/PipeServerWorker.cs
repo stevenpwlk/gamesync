@@ -349,7 +349,10 @@ public sealed partial class PipeServerWorker(
         var flowKind = resolution.Status switch
         {
             ManagedSlotStatus.Missing => TransferFlowKind.InitialSlotSetup,
-            ManagedSlotStatus.Ready => TransferFlowKind.ManagedSlotReuse,
+            // RenamePending : slot rattaché, nom affiché WGS pas encore renommé. La
+            // réutilisation écrit ce nom en même temps que le contenu (voir ManagedSlotResolver
+            // et HomeStatePresenter.PresentSlotStatus pour la même règle côté accueil).
+            ManagedSlotStatus.Ready or ManagedSlotStatus.RenamePending => TransferFlowKind.ManagedSlotReuse,
             _ => (TransferFlowKind?)null
         };
         if (flowKind is null)

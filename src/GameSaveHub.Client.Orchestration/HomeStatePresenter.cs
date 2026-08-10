@@ -46,7 +46,11 @@ public static class HomeStatePresenter
 
     private static HomeViewState PresentSlotStatus(ManagedSlotStatus status) => status switch
     {
-        ManagedSlotStatus.Ready => View(
+        // RenamePending : le slot vient d'être rattaché (nom logique connu) mais son nom
+        // affiché WGS n'est pas encore GSH-MONDE-PARTAGE. Le prochain « Prendre la main »
+        // écrit ce nom en même temps que le contenu (ReplaceManagedSlotAsync) ; ce n'est
+        // donc pas un état à part pour le joueur, juste la prise en main habituelle.
+        ManagedSlotStatus.Ready or ManagedSlotStatus.RenamePending => View(
             HomeVisualState.Ready,
             "Le monde est prêt",
             "Vous pouvez préparer la dernière version pour héberger la partie.",

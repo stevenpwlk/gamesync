@@ -95,6 +95,16 @@ public sealed class HomeStatePresenterTests
     }
 
     [Fact]
+    public void RenamePendingBehavesLikeReadyForDailyTakeControl()
+    {
+        var view = HomeStatePresenter.Present(Context(slot: ManagedSlotStatus.RenamePending));
+
+        Assert.Equal("Le monde est prêt", view.Title);
+        Assert.Equal(HomePrimaryAction.StartTransfer, view.PrimaryAction);
+        Assert.Equal("Prendre la main", view.PrimaryActionLabel);
+    }
+
+    [Fact]
     public void LegacyCandidateOffersExplicitRebind()
     {
         var view = HomeStatePresenter.Present(Context(slot: ManagedSlotStatus.LegacyCandidate));
@@ -104,7 +114,6 @@ public sealed class HomeStatePresenterTests
     }
 
     [Theory]
-    [InlineData(ManagedSlotStatus.RenamePending)]
     [InlineData(ManagedSlotStatus.UnboundCandidate)]
     [InlineData(ManagedSlotStatus.BoundSlotMissing)]
     [InlineData(ManagedSlotStatus.BindingMismatch)]
