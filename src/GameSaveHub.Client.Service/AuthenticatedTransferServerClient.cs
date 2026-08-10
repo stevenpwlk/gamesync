@@ -164,6 +164,25 @@ public sealed class AuthenticatedTransferServerClient(
         await EnsureSuccessAsync(response, cancellationToken);
     }
 
+    /// <summary>
+    /// Révoque cet appareil côté serveur avant une désinstallation. Ne lève jamais :
+    /// un échec (hors ligne, serveur injoignable, déjà révoqué) doit laisser
+    /// l'appelant décider de continuer la suppression locale quand même.
+    /// </summary>
+    public async Task<bool> RevokeSelfAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, Api("device/revoke-self"));
+            using var response = await SendAuthorizedAsync(request, cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or TransferServerException)
+        {
+            return false;
+        }
+    }
+
     private Uri Api(string relative) => new(_baseUri, "api/v1/" + relative);
 
     private async Task<HttpResponseMessage> SendAuthorizedAsync(
