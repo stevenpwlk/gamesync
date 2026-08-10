@@ -78,6 +78,44 @@ switch ($"{args[0].ToLowerInvariant()} {args[1].ToLowerInvariant()}")
         Console.WriteLine($"Version {signVersion}, sha256 {signSha256}");
         return 0;
 
+    case "client-release publish":
+        RequireArgCount(args, 4);
+        var publishZipPath = Path.GetFullPath(args[2]);
+        var publishManifestPath = Path.GetFullPath(args[3]);
+        if (!File.Exists(publishZipPath)) throw new InvalidOperationException("Fichier de paquet introuvable.");
+        if (!File.Exists(publishManifestPath)) throw new InvalidOperationException("Fichier de manifeste introuvable.");
+        var publishSignedManifest = JsonSerializer.Deserialize<SignedClientReleaseManifest>(await File.ReadAllTextAsync(publishManifestPath))
+            ?? throw new InvalidOperationException("Manifeste illisible.");
+        var publicKeyPem = Environment.GetEnvironmentVariable("GSH_CLIENT_RELEASE_PUBLIC_KEY_PEM")
+            ?? throw new InvalidOperationException("GSH_CLIENT_RELEASE_PUBLIC_KEY_PEM absente : impossible de vérifier la signature.");
+        if (!ClientReleaseSignature.Verify(publishSignedManifest, publicKeyPem))
+            throw new InvalidOperationException("Signature du manifeste invalide : publication refusée.");
+        var publishActualHash = await FileSafety.ComputeSha256Async(publishZipPath);
+        if (!publishActualHash.Equals(publishSignedManifest.Sha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Le hash du paquet ne correspond pas au manifeste signé.");
+        if (await db.ClientReleases.AnyAsync(x => x.Version == publishSignedManifest.Version))
+            throw new InvalidOperationException($"La version {publishSignedManifest.Version} est déjà publiée.");
+        var publishStore = new ClientReleaseObjectStore(Options.Create(new StorageOptions
+        {
+            Root = ReadStorageRoot(),
+            MaxArtifactBytes = ReadMaximumArtifactBytes()
+        }));
+        await publishStore.PutAsync(publishZipPath, publishActualHash, publishSignedManifest.Version);
+        var publishLength = new FileInfo(publishZipPath).Length;
+        db.ClientReleases.Add(new ClientReleaseEntity
+        {
+            Id = Guid.NewGuid(),
+            Version = publishSignedManifest.Version,
+            Sha256 = publishActualHash,
+            Signature = publishSignedManifest.Signature,
+            Length = publishLength,
+            PublishedAtUtc = DateTimeOffset.UtcNow
+        });
+        Audit(db, "client-release.publish", publishSignedManifest.Version, "Publication d'une nouvelle version cliente signée.", new { sha256 = publishActualHash, length = publishLength });
+        await db.SaveChangesAsync();
+        Console.WriteLine($"Version {publishSignedManifest.Version} publiée ({publishLength} octets, sha256 {publishActualHash}).");
+        return 0;
+
     case "world create":
         RequireArgCount(args, 3);
         var world = new WorldEntity { Id = Guid.NewGuid(), Name = args[2].Trim(), CreatedAtUtc = DateTimeOffset.UtcNow };
