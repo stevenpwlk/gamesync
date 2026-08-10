@@ -92,7 +92,10 @@ public sealed class TransferOrchestratorTests : IDisposable
         Assert.Equal(1, adapter.ManagedSlotBaselineCalls);
         Assert.Equal(1, adapter.ManagedSlotReplaceCalls);
         Assert.Equal(0, adapter.BaselineCalls);
-        Assert.Equal(1, ManagedSlotStore.WriteCalls);
+        // 1 pour le binding initial du test + 1 pour la synchronisation du nom affiché
+        // après le remplacement réussi (GSH-SHLAGS-RETURN -> GSH-MONDE-PARTAGE).
+        Assert.Equal(2, ManagedSlotStore.WriteCalls);
+        Assert.Equal(ManagedSlotResolver.PermanentDisplayName, (await ManagedSlotStore.ReadAsync())!.CurrentDisplayName);
     }
 
     [Fact]
@@ -350,12 +353,15 @@ public sealed class TransferOrchestratorTests : IDisposable
         return (new TransferOrchestrator(adapter, server, store, ManagedSlotStore), adapter, server, store);
     }
 
+    // Nom courant volontairement différent du nom désiré : reproduit l'état réel juste après
+    // un rattachement (GSH-SHLAGS-RETURN), avant tout remplacement réussi. Un binding déjà
+    // "propre" masquerait un défaut de synchronisation après la première réutilisation.
     private static ManagedSlotBinding Binding(string logicalName) => ManagedSlotBinding.Create(
         "fake",
         "pkg",
         "Stevenpwlk",
         logicalName,
-        ManagedSlotResolver.PermanentDisplayName,
+        "GSH-SHLAGS-RETURN",
         ManagedSlotResolver.PermanentDisplayName,
         DateTimeOffset.UtcNow);
 
@@ -509,9 +515,19 @@ public sealed class TransferOrchestratorTests : IDisposable
         public bool ManagedSlotReplaceSucceeds { get; set; } = true;
         public ManagedSlotReconciliationState ManagedSlotReconcileState { get; set; } = ManagedSlotReconciliationState.PreviousPayloadPresent;
 
+        // Reproduit fidèlement le vrai adaptateur : la baseline refuse si le nom affiché
+        // courant declaré ne correspond pas à l'état réel, et un remplacement réussi met
+        // cet état à jour. Un double trop laxiste ici avait masqué un vrai défaut de
+        // synchronisation du binding après la première réutilisation.
+        public string CurrentManagedSlotDisplayName { get; set; } = "GSH-SHLAGS-RETURN";
+
         public Task<ManagedSlotBaselineResult> CreateManagedSlotBaselineAsync(ManagedSlotReference slot, string outputRoot, CancellationToken cancellationToken = default)
         {
             ManagedSlotBaselineCalls++;
+            if (!slot.CurrentDisplayName.Equals(CurrentManagedSlotDisplayName, StringComparison.Ordinal))
+            {
+                return Task.FromResult(new ManagedSlotBaselineResult(false, null, null, ["managed_slot_baseline_failed"]));
+            }
             var path = Path.Combine(outputRoot, "managed-slot-baseline");
             Directory.CreateDirectory(path);
             return Task.FromResult(new ManagedSlotBaselineResult(true, path, null, []));
@@ -524,6 +540,7 @@ public sealed class TransferOrchestratorTests : IDisposable
             {
                 return Task.FromResult(new PortableImportResult(false, slot.LogicalName, slot.CurrentDisplayName, Path.Combine(root, "snapshot"), "previous-sha", null, ["guard"]));
             }
+            CurrentManagedSlotDisplayName = slot.DesiredDisplayName;
             return Task.FromResult(new PortableImportResult(true, slot.LogicalName, slot.DesiredDisplayName, Path.Combine(root, "snapshot"), "previous-sha", "payload-sha", []));
         }
 

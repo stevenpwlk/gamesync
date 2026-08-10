@@ -587,6 +587,7 @@ public sealed class TransferOrchestrator(
                 LastErrorCode = null,
                 LastErrorMessage = null
             }, "managed-slot-replaced", cancellationToken);
+            await SyncManagedSlotBindingDisplayNameAsync(session, cancellationToken);
             await TryHeartbeatAsync(session, "ready-to-play", cancellationToken);
             return Success("ready_to_play", $"Le slot {ManagedSlotResolver.PermanentDisplayName} a été mis à jour. Lancez Planet Crafter manuellement et ouvrez uniquement ce monde.", session);
         }
@@ -633,6 +634,7 @@ public sealed class TransferOrchestrator(
                 LastErrorCode = null,
                 LastErrorMessage = null
             }, "managed-slot-reconciled-as-complete", cancellationToken);
+            await SyncManagedSlotBindingDisplayNameAsync(session, cancellationToken);
             await TryHeartbeatAsync(session, "ready-to-play-recovered", cancellationToken);
             return Success("ready_to_play", "La réutilisation du slot avait déjà été effectuée avant l'interruption. Aucune nouvelle écriture WGS n'a été faite.", session);
         }
@@ -657,6 +659,22 @@ public sealed class TransferOrchestrator(
             session,
             "managed_slot_reconciliation_failed",
             string.Join("; ", reconciliation.Errors.DefaultIfEmpty($"État de réconciliation : {reconciliation.State}.")),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Après un remplacement réussi (immédiat ou reconnu par reprise), le nom affiché WGS
+    /// vaut désormais <see cref="TransferSession.ManagedSlotDesiredDisplayName"/>. Sans mettre
+    /// à jour le binding persistant en conséquence, la prochaine réutilisation le comparerait
+    /// à l'ancien nom courant et échouerait systématiquement dès la deuxième prise en main.
+    /// </summary>
+    private async Task SyncManagedSlotBindingDisplayNameAsync(TransferSession session, CancellationToken cancellationToken)
+    {
+        if (session.ManagedSlotDesiredDisplayName is not string desiredDisplayName) return;
+        var binding = await managedSlotStore.ReadAsync(cancellationToken);
+        if (binding is null || binding.CurrentDisplayName.Equals(desiredDisplayName, StringComparison.Ordinal)) return;
+        await managedSlotStore.WriteAsync(
+            binding with { CurrentDisplayName = desiredDisplayName, LastValidatedAtUtc = _clock.GetUtcNow() },
             cancellationToken);
     }
 
