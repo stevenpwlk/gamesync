@@ -72,13 +72,18 @@ Toutes les lignes ci-dessous sont codées, testées unitairement (mondes/adaptat
 
 ## Reste à faire avant la validation réelle
 
-- [ ] Tâche 11 — Vérification automatisée complète : reconstruction propre, revue ciblée (sélection par nom affiché, contournement du verrou de transition, écriture WGS sans snapshot, fuite d'identifiant technique vers l'IHM), `git diff --check`, régénération et contrôle de `SOURCE-SHA256SUMS.txt`.
+- [x] Tâche 11 — Vérification automatisée complète : reconstruction propre, revue ciblée (sélection par nom affiché, contournement du verrou de transition, écriture WGS sans snapshot, fuite d'identifiant technique vers l'IHM), `git diff --check`, régénération et contrôle de `SOURCE-SHA256SUMS.txt`. (2026-08-10, commit `dc7798a`)
+
+## Bug trouvé et corrigé pendant le pilote réel (2026-08-10)
+
+- Après un rattachement réussi, `ManagedSlotResolver` renvoie `RenamePending` (slot lié, nom affiché WGS pas encore `GSH-MONDE-PARTAGE`). Ni l'accueil ni `transfer-start` ne géraient ce statut : les deux tombaient dans le repli générique « à vérifier », bloquant définitivement l'étape qui devait justement effectuer le renommage. Corrigé en traitant `RenamePending` comme `Ready` aux deux endroits (commit `353c5d1`) ; paquet `0.4.0-pilot` reconstruit et réinstallé avec le correctif ; confirmé en conditions réelles : l'accueil affiche maintenant « Le monde est prêt » / « Prendre la main ».
 
 ## Acceptation réelle du slot permanent
 
-- [ ] Créer un nouveau snapshot WGS et une sauvegarde de `ProgramData` juste avant migration.
-- [ ] Installer `0.4.0-pilot` sur Steven après approbation explicite.
-- [ ] Rattacher l'unique `GSH-SHLAGS-RETURN`, puis le renommer en `GSH-MONDE-PARTAGE` uniquement lors de l'import sûr suivant.
+- [x] Créer un nouveau snapshot WGS et une sauvegarde de `ProgramData` juste avant migration. (2026-08-10 — snapshot `snapshots/20260810T090702Z-3ee7278f96d447a19f87bf317df96f59`, 9 fichiers vérifiés ; sauvegarde `ProgramData` dans `snapshots/pre-migration-programdata-20260810T090702Z/`, 81 fichiers, 1.14 Mo.)
+- [x] Installer `0.4.0-pilot` sur Steven après approbation explicite. (2026-08-10 — service `Running`/`Automatic`, pipe répond en 1.7 s, `deviceId`/pseudo/clé CNG préservés, pas de ré-enrôlement. Réinstallé une deuxième fois après le correctif `RenamePending`.)
+- [x] Rattacher l'unique `GSH-SHLAGS-RETURN`. (2026-08-10 — `managed-slot.json` créé, `logicalName: Standard-5.json`, `desiredDisplayName: GSH-MONDE-PARTAGE` ; comparaison rigoureuse des 9 fichiers WGS avant/après rattachement : hash strictement identiques, aucun octet modifié.)
+- [ ] Renommer en `GSH-MONDE-PARTAGE` lors de l'import sûr suivant (première prise en main — voir ligne ci-dessous, pas encore réalisée).
 - [ ] Première prise en main : même nom logique, aucun monde supplémentaire, vraie modification de jeu publiée, monde serveur de nouveau disponible.
 - [ ] Deuxième prise en main : même nom logique réutilisé et ensemble des mondes WGS inchangé.
 - [ ] Vérifier redémarrage, interruption d'import, reprise idempotente et `maintenance-status`.
