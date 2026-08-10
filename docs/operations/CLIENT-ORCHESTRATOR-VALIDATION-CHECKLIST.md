@@ -74,9 +74,12 @@ Toutes les lignes ci-dessous sont codées, testées unitairement (mondes/adaptat
 
 - [x] Tâche 11 — Vérification automatisée complète : reconstruction propre, revue ciblée (sélection par nom affiché, contournement du verrou de transition, écriture WGS sans snapshot, fuite d'identifiant technique vers l'IHM), `git diff --check`, régénération et contrôle de `SOURCE-SHA256SUMS.txt`. (2026-08-10, commit `dc7798a`)
 
-## Bug trouvé et corrigé pendant le pilote réel (2026-08-10)
+## Bugs trouvés et corrigés pendant le pilote réel (2026-08-10)
 
-- Après un rattachement réussi, `ManagedSlotResolver` renvoie `RenamePending` (slot lié, nom affiché WGS pas encore `GSH-MONDE-PARTAGE`). Ni l'accueil ni `transfer-start` ne géraient ce statut : les deux tombaient dans le repli générique « à vérifier », bloquant définitivement l'étape qui devait justement effectuer le renommage. Corrigé en traitant `RenamePending` comme `Ready` aux deux endroits (commit `353c5d1`) ; paquet `0.4.0-pilot` reconstruit et réinstallé avec le correctif ; confirmé en conditions réelles : l'accueil affiche maintenant « Le monde est prêt » / « Prendre la main ».
+1. Après un rattachement réussi, `ManagedSlotResolver` renvoie `RenamePending` (slot lié, nom affiché WGS pas encore `GSH-MONDE-PARTAGE`). Ni l'accueil ni `transfer-start` ne géraient ce statut : les deux tombaient dans le repli générique « à vérifier », bloquant définitivement l'étape qui devait justement effectuer le renommage. Corrigé en traitant `RenamePending` comme `Ready` aux deux endroits (commit `353c5d1`).
+2. La deuxième prise en main échouait avec `managed_slot_baseline_failed` : `managed-slot.json` garde le nom affiché *d'origine* (`GSH-SHLAGS-RETURN`) et n'était jamais mis à jour après un remplacement réussi, donc la baseline de la deuxième réutilisation comparait le nom affiché réel (déjà renommé) au nom périmé du binding. Aucune écriture WGS n'avait eu lieu (refus avant `serverImportStarted`). Corrigé en synchronisant `managed-slot.json` après chaque remplacement réussi (commit `f448b26`) ; le double de test qui avait laissé passer ce défaut a aussi été durci pour reproduire fidèlement la vérification du vrai adaptateur.
+
+Paquet `0.4.0-pilot` reconstruit et réinstallé après chaque correctif ; les deux confirmés en conditions réelles.
 
 ## Acceptation réelle du slot permanent
 
