@@ -63,11 +63,12 @@ Toutes les lignes ci-dessous sont codées, testées unitairement (mondes/adaptat
 
 ### Parcours quotidien (hérité de l'ancien pilote, toujours à revérifier après ces changements)
 
-- [ ] Charger réellement le monde importé, modifier un élément identifiable, sauvegarder, fermer et vérifier la progression publiée de bout en bout.
-- [ ] Vérifier un redémarrage Windows pendant une session `InGame`, puis la reprise de capture après stabilité.
-- [ ] Vérifier une coupure contrôlée pendant l'import et la réconciliation sans nouvelle écriture ambiguë.
-- [ ] Vérifier les états contextuels : jeu lancé hors Hub, serveur indisponible puis rétabli, hôte distant en préparation et en jeu, reprise manuelle après incident, mise à jour requise.
-- [ ] Vérifier l'interface à 1440×1024 et aux échelles Windows 100 %, 125 %, 150 % et 200 %.
+- [x] Charger réellement le monde importé, modifier un élément identifiable, sauvegarder, fermer et vérifier la progression publiée de bout en bout. (2026-08-10 — deux fois, voir « Acceptation réelle du slot permanent » ci-dessus.)
+- [ ] Vérifier un redémarrage Windows pendant une session `InGame`, puis la reprise de capture après stabilité. (regroupé avec la coupure de service ci-dessous, à faire ensemble.)
+- [ ] Vérifier une coupure contrôlée pendant l'import et la réconciliation sans nouvelle écriture ambiguë. (regroupé avec le redémarrage Windows — la réutilisation étant désormais quasi instantanée, ce test cible plutôt la coupure du service pendant une session `InGame` en cours.)
+- [x] État contextuel « jeu lancé hors Hub ». (2026-08-10 — jeu lancé directement depuis Xbox sans passer par GameSave Hub ; accueil affiche bien « Le jeu est lancé hors de GameSave Hub », aucune action ; confirmé côté service : `gameRunning=true`, aucune session locale ni distante.)
+- [ ] États contextuels restants : serveur indisponible puis rétabli, hôte distant en préparation et en jeu, reprise manuelle après incident, mise à jour requise.
+- [ ] Vérifier l'interface à 1440×1024 et aux échelles Windows 100 %, 125 %, 150 % et 200 %. (reporté à la demande de l'utilisateur.)
 - [ ] Vérifier clavier seul, focus visible, noms lecteur d'écran, retour `Copié`, absence de débordement et absence d'identifiants techniques sur l'accueil.
 
 ## Reste à faire avant la validation réelle
