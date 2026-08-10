@@ -368,6 +368,7 @@ public sealed class TransferOrchestratorTests : IDisposable
     {
         private readonly Dictionary<Guid, TransferSession> _sessions = [];
         public string RootPath { get; } = root;
+        public bool IsWriteInProgress => false;
         public string GetSessionDirectory(Guid localSessionId)
         {
             var path = Path.Combine(RootPath, localSessionId.ToString("D"));

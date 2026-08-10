@@ -9,6 +9,7 @@ public sealed class ClientServiceOptions
     public string ServerBaseUrl { get; set; } = "https://saves.stevenpwlk.fr:18443/";
     public string StatePath { get; set; } = "%ProgramData%\\GameSaveHub\\client-state.json";
     public string TransferRootPath { get; set; } = "%ProgramData%\\GameSaveHub\\transfers";
+    public string ManagedSlotStatePath { get; set; } = "%ProgramData%\\GameSaveHub\\managed-slot.json";
     public string CngKeyName { get; set; } = "GameSaveHub.DeviceIdentity";
     public bool EnableWgsTransfer { get; set; }
 }

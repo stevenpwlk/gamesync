@@ -19,6 +19,7 @@ public sealed partial class PipeServerWorker(
     TransferTransitionGate transitionGate,
     ITransferSessionStore sessionStore,
     IGameSaveAdapter adapter,
+    ManagedSlotCoordinator slotCoordinator,
     ILogger<PipeServerWorker> logger) : BackgroundService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -151,6 +152,13 @@ public sealed partial class PipeServerWorker(
                     ToPipe(await transitionGate.RunAsync(
                         () => orchestrator.AbortAsync(abortSessionId, cancellationToken),
                         cancellationToken)),
+                "managed-slot-bind-existing" =>
+                    await transitionGate.RunAsync(() => BindExistingManagedSlotAsync(cancellationToken), cancellationToken),
+                "maintenance-status" => new PipeResponse(
+                    true,
+                    "ok",
+                    "État de sûreté pour mise à jour.",
+                    await slotCoordinator.GetMaintenanceStatusAsync(cancellationToken)),
                 _ => new PipeResponse(false, "command_unknown", "Commande locale inconnue ou incomplète.")
             };
         }
@@ -331,7 +339,34 @@ public sealed partial class PipeServerWorker(
                 "Le pseudo demandé ne correspond pas au profil local enregistré.");
         }
 
-        return ToPipe(await orchestrator.StartAsync(worldId, state.RegisteredPlayerName, cancellationToken: cancellationToken));
+        var resolution = await slotCoordinator.GetStatusAsync(state.RegisteredPlayerName, cancellationToken);
+        var flowKind = resolution.Status switch
+        {
+            ManagedSlotStatus.Missing => TransferFlowKind.InitialSlotSetup,
+            ManagedSlotStatus.Ready => TransferFlowKind.ManagedSlotReuse,
+            _ => (TransferFlowKind?)null
+        };
+        if (flowKind is null)
+        {
+            return new PipeResponse(
+                false,
+                resolution.SafetyStopCode ?? "managed_slot_requires_attention",
+                "Le slot du monde partagé doit être vérifié avant de continuer.");
+        }
+
+        return ToPipe(await orchestrator.StartAsync(worldId, state.RegisteredPlayerName, flowKind.Value, cancellationToken));
+    }
+
+    private async Task<PipeResponse> BindExistingManagedSlotAsync(CancellationToken cancellationToken)
+    {
+        var state = await stateStore.ReadAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(state.RegisteredPlayerName))
+        {
+            return new PipeResponse(false, "player_profile_missing", "Pseudo Planet Crafter non configuré.");
+        }
+
+        var result = await slotCoordinator.BindExistingAsync(state.RegisteredPlayerName, cancellationToken);
+        return new PipeResponse(result.Success, result.Code, result.Message);
     }
 
     /// <summary>

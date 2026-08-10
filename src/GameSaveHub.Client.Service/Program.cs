@@ -22,11 +22,17 @@ builder.Services.AddSingleton<ITransferSessionStore>(services =>
     var options = services.GetRequiredService<IOptions<ClientServiceOptions>>().Value;
     return new FileTransferSessionStore(options.TransferRootPath);
 });
+builder.Services.AddSingleton<IManagedSlotStore>(services =>
+{
+    var options = services.GetRequiredService<IOptions<ClientServiceOptions>>().Value;
+    return new FileManagedSlotStore(options.ManagedSlotStatePath);
+});
 builder.Services.AddHttpClient<ServerEnrollmentClient>();
 builder.Services.AddHttpClient<ITransferServerClient, AuthenticatedTransferServerClient>();
 builder.Services.AddSingleton<TransferOrchestrator>();
 builder.Services.AddSingleton<TransferTransitionGate>();
 builder.Services.AddSingleton<GameLifecycleMonitor>();
+builder.Services.AddSingleton<ManagedSlotCoordinator>();
 builder.Services.AddHostedService<TransferRecoveryWorker>();
 builder.Services.AddHostedService<TransferHeartbeatWorker>();
 builder.Services.AddHostedService<GameLifecycleWorker>();
