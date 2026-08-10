@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using GameSaveHub.Contracts;
 using GameSaveHub.Core;
 using GameSaveHub.Server.Infrastructure;
 using GameSaveHub.Server.Admin;
@@ -59,6 +60,22 @@ switch ($"{args[0].ToLowerInvariant()} {args[1].ToLowerInvariant()}")
         Audit(db, "device.revoke", deviceId.ToString("D"), "Révocation demandée par l'administrateur local.");
         await db.SaveChangesAsync();
         Console.WriteLine($"Appareil {deviceId:D} révoqué.");
+        return 0;
+
+    case "client-release sign":
+        RequireArgCount(args, 5);
+        var signZipPath = Path.GetFullPath(args[2]);
+        var signVersion = args[3].Trim();
+        var signPrivateKeyPem = await File.ReadAllTextAsync(args[4]);
+        if (!File.Exists(signZipPath)) throw new InvalidOperationException("Fichier de paquet introuvable.");
+        var signSha256 = await FileSafety.ComputeSha256Async(signZipPath);
+        var signManifest = new ClientReleaseManifest(signVersion, signSha256, $"/api/v1/client/packages/{signVersion}");
+        var signSignature = ClientReleaseSignature.Sign(signManifest, signPrivateKeyPem);
+        var signedManifest = new SignedClientReleaseManifest(signVersion, signSha256, signManifest.DownloadUrl, signSignature);
+        var signOutputPath = signZipPath + ".manifest.json";
+        await File.WriteAllTextAsync(signOutputPath, JsonSerializer.Serialize(signedManifest, new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine($"Manifeste signé écrit : {signOutputPath}");
+        Console.WriteLine($"Version {signVersion}, sha256 {signSha256}");
         return 0;
 
     case "world create":
@@ -237,6 +254,8 @@ static void Usage()
           version list <world-id>|protect <version-id> <justification>
           retention plan|purge <world-id>
           session list|release <session-id> <justification>
+          client-release sign <fichier.zip> <version> <cle-privee.pem>
+          client-release publish <fichier.zip> <manifeste-signe.json>
           storage verify
         """);
 }

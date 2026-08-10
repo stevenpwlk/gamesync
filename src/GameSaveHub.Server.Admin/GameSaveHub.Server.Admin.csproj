@@ -9,6 +9,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <ProjectReference Include="..\GameSaveHub.Contracts\GameSaveHub.Contracts.csproj" />
     <ProjectReference Include="..\GameSaveHub.Core\GameSaveHub.Core.csproj" />
     <ProjectReference Include="..\GameSaveHub.Server.Infrastructure\GameSaveHub.Server.Infrastructure.csproj" />
   </ItemGroup>
