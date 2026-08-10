@@ -18,6 +18,7 @@ builder.Configuration.AddKeyPerFile("/run/secrets", optional: true);
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.Configure<AuthenticationOptions>(builder.Configuration.GetSection("Authentication"));
 builder.Services.Configure<FeatureGateOptions>(builder.Configuration.GetSection("FeatureGates"));
+builder.Services.Configure<ClientCompatibilityOptions>(builder.Configuration.GetSection("ClientCompatibility"));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ImmutableArtifactStore>();
 builder.Services.AddDbContext<GameSaveHubDbContext>(options =>
@@ -334,10 +335,14 @@ protectedApi.MapPost("/worlds/{id:guid}/acquire", async (
     AcquireWorldRequest request,
     GameSaveHubDbContext db,
     IOptions<FeatureGateOptions> gates,
+    IOptions<ClientCompatibilityOptions> compatibility,
     TimeProvider clock,
     HttpContext context,
     CancellationToken cancellationToken) =>
 {
+    var clientVersion = context.Request.Headers["X-GameSaveHub-Client-Version"].ToString();
+    if (!ClientCompatibilityPolicy.CanAcquire(clientVersion, compatibility.Value.MinimumAcquireVersion))
+        return Error(context, 409, "client_update_required", "Une mise à jour de GameSave Hub est nécessaire avant de prendre la main.");
     if (!gates.Value.AllowHostTransfer)
         return Error(context, 409, "host_transfer_not_validated", "Le transfert d'hôte reste bloqué par le feature gate de production.");
     if (!TryDeviceId(context.User, out var deviceId)) return Error(context, 401, "token_invalid", "Jeton d'appareil invalide.");
