@@ -81,3 +81,5 @@ Ne pas encore prendre la main.
 ## Étape suivante : Bob (Tâche 14)
 
 Ne commencer qu'après que les étapes 1 à 7 sont cochées avec preuves dans la checklist. Bob reçoit exactement le même ZIP `0.4.0-pilot` (même SHA-256), réalise sa propre configuration initiale (pas de rattachement, son PC n'a jamais eu de slot), puis le cycle réel `Steven → Bob → Steven` est exécuté avec vérification de topologie, inventaire et versions à chaque relais.
+
+Ce que Steven doit préparer et envoyer à Bob, et le guide pas-à-pas à lui transmettre : [`GUIDE-BOB-CONFIGURATION-INITIALE.md`](GUIDE-BOB-CONFIGURATION-INITIALE.md).
