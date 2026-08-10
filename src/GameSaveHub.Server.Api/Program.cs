@@ -21,6 +21,7 @@ builder.Services.Configure<FeatureGateOptions>(builder.Configuration.GetSection(
 builder.Services.Configure<ClientCompatibilityOptions>(builder.Configuration.GetSection("ClientCompatibility"));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ImmutableArtifactStore>();
+builder.Services.AddScoped<ClientReleaseObjectStore>();
 builder.Services.AddDbContext<GameSaveHubDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("GameSaveHub")));
 
@@ -113,6 +114,27 @@ app.Use(async (context, next) =>
     await next();
 });
 app.MapHealthChecks("/healthz");
+
+app.MapGet("/api/v1/client/latest", async (GameSaveHubDbContext db, HttpContext context, CancellationToken cancellationToken) =>
+{
+    var latest = await db.ClientReleases.OrderByDescending(x => x.PublishedAtUtc).FirstOrDefaultAsync(cancellationToken);
+    if (latest is null) return Error(context, 404, "no_release_published", "Aucune version cliente n'a encore été publiée.");
+    return Results.Ok(new SignedClientReleaseManifest(
+        latest.Version,
+        latest.Sha256,
+        $"/api/v1/client/packages/{latest.Version}",
+        latest.Signature));
+});
+
+app.MapGet("/api/v1/client/packages/{version}", async (string version, GameSaveHubDbContext db, ClientReleaseObjectStore store, HttpContext context, CancellationToken cancellationToken) =>
+{
+    var release = await db.ClientReleases.SingleOrDefaultAsync(x => x.Version == version, cancellationToken);
+    if (release is null) return Error(context, 404, "release_not_found", "Version cliente introuvable.");
+    var path = store.GetObjectPath(release.Sha256, release.Version);
+    return File.Exists(path)
+        ? Results.File(path, "application/zip", $"GameSaveHub-Setup-{release.Version}.zip", enableRangeProcessing: true)
+        : Error(context, 409, "release_object_missing", "Objet de release absent du stockage.");
+});
 
 app.MapPost("/api/v1/enrollments/redeem", async (
     EnrollmentRedeemRequest request,
