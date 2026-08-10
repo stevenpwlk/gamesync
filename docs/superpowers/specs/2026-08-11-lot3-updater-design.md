@@ -37,6 +37,19 @@ N'affiche aucune fenêtre. Séquence :
 7. Si sûr : arrêter le service, effectuer la bascule (§6), redémarrer le service, vérifier qu'il répond au tube nommé sous 30 secondes.
 8. Journaliser le résultat (succès, échec de vérification, report pour cause de jeu actif, échec de démarrage post-bascule) dans le même répertoire de diagnostics que le reste du client.
 
+### 3.3 Mode désinstallation (`--uninstall`, ou bouton « Désinstaller » dans l'application)
+
+Remplace `UNINSTALL-GAMESAVEHUB-CLIENT.ps1`, qui restait un script séparé à exécuter manuellement en administrateur et qui conservait toujours `%ProgramData%\GameSaveHub` par prudence. Le mode `--uninstall` du même exécutable signé effectue une désinstallation complète en une seule action :
+
+1. Interroger `maintenance-status` : si une session locale est active ou une transition en cours, refuser avec un message clair plutôt que de désinstaller en pleine écriture WGS.
+2. Tant que l'identité CNG locale existe, appeler `POST /api/v1/device/revoke-self` (§7) pour révoquer l'appareil côté serveur avant de supprimer quoi que ce soit localement.
+   - Succès → continuer.
+   - Échec (hors ligne, serveur injoignable, déjà révoqué) → afficher clairement que la révocation n'a pas pu être confirmée et que Steven devra la faire manuellement côté NAS, puis continuer quand même la suppression locale — un ami qui désinstalle hors ligne ne doit pas rester bloqué.
+3. Arrêter et supprimer le service Windows, l'application et le raccourci (comme aujourd'hui).
+4. Supprimer la tâche planifiée `GameSaveHubUpdater` si présente.
+5. Supprimer entièrement `%ProgramData%\GameSaveHub` (identité CNG, `managed-slot.json`, `client-state.json`, `update-staging`) — contrairement au script actuel, qui les conservait systématiquement.
+6. Afficher un résumé final : ce qui a été supprimé, et si la révocation serveur a réussi ou reste à faire manuellement.
+
 ## 4. Signature et intégrité
 
 Une paire de clés ECDSA P-256 — même famille cryptographique que l'identité machine CNG déjà utilisée par le client, pour ne pas introduire un second mécanisme dans le dépôt. La clé privée n'est jamais commitée ni déployée sur le NAS ; elle reste uniquement sur le poste de Steven, utilisée au moment de publier une nouvelle version. La clé publique est une constante compilée dans `GameSaveHub-Setup.exe`.
@@ -76,20 +89,34 @@ Il n'y a pas de rollback automatique au sens d'un moteur dédié : la garantie d
 
 Cette table suit le même principe que `ReconcileManagedSlotReplacementAsync` du Lot 2 : trois états, lecture seule pour décider, jamais de suppression avant d'avoir statué. Si le service ne redémarre pas correctement dans les 30 secondes suivant une bascule terminée, l'exécution silencieuse le journalise comme échec mais ne tente aucune action corrective automatique — l'ancien contenu n'existe alors plus (le nouveau a déjà remplacé l'ancien avec succès au niveau fichiers), donc il n'y a rien de sûr à restaurer automatiquement ; ce cas nécessite une intervention manuelle, journalisée clairement pour rester diagnosticable.
 
-## 7. Compatibilité et déploiement
+## 7. Désinstallation complète et révocation
+
+Nouvel endpoint authentifié sur `GameSaveHub.Server.Api`, appelé uniquement par le mode `--uninstall` (§3.3) :
+
+```
+POST /api/v1/device/revoke-self
+Authentification : la même signature d'identité machine CNG que les autres requêtes authentifiées.
+→ 204 le device correspondant à l'identité appelante est révoqué.
+→ 409 device_has_active_session si ce device détient une session serveur active — protection côté serveur en complément de la vérification locale de maintenance-status à l'étape 1, jamais de révocation qui orphelinerait silencieusement une écriture en cours.
+```
+
+Un device revient une fois révoqué exactement dans le même état qu'après un `device revoke` déclenché par l'admin via la CLI existante (§ADMIN.md) : toute requête authentifiée suivante avec ce certificat est rejetée. Cet endpoint ne fait que permettre au device de déclencher lui-même l'action déjà possible manuellement ; il ne change aucune règle d'autorisation existante et ne peut révoquer que l'identité de l'appelant, jamais un autre device.
+
+## 8. Compatibilité et déploiement
 
 Rollout additif, comme pour le verrou de version au Lot 2 : la première version du client comportant la tâche planifiée doit être installée manuellement (Steven, puis Bob, puis chaque nouveau joueur lors de son onboarding) puisqu'un client antérieur n'a pas encore de tâche planifiée pour découvrir les mises à jour suivantes. Une fois ce socle en place sur un poste, toute version publiée ensuite s'y propage seule.
 
 `managed-slot.json`, l'identité CNG et le pseudo enregistré restent dans `%ProgramData%\GameSaveHub`, jamais touchés par la bascule de dossier (qui ne porte que sur `%ProgramFiles%\GameSaveHub\Client`).
 
-## 8. Hors périmètre
+## 9. Hors périmètre
 
 - Certificat Authenticode commercial et suppression de l'avertissement SmartScreen.
 - Rollback automatique multi-versions ou reprise après un service qui démarre mais fonctionne mal (au-delà de l'échec de démarrage sous 30 s).
 - Mise à jour poussée depuis le NAS vers un poste précis à la demande (déclenchement reste toujours côté client, à l'heure planifiée).
+- Désinstallation ou révocation forcée à distance par l'administrateur (le déclenchement reste toujours côté poste concerné ; la révocation manuelle par la CLI admin existante reste le filet de sécurité en cas de désinstallation hors ligne).
 - Toute modification du protocole de transfert de sauvegarde, du slot permanent ou du verrou de version déjà livrés au Lot 2.
 - Distribution au-delà du groupe de joueurs déjà enrôlés (pas de portail public de téléchargement).
 
-## 9. Vérification
+## 10. Vérification
 
-Tests unitaires : vérification de signature (paquet valide, hash altéré, signature invalide, manifeste non signé), résolution des trois états de réconciliation du §6, et la condition de report quand `maintenance-status` renvoie `SafeToUpdate=false`. Validation réelle sur le PC de Steven en premier (installation par le nouvel exécutable unique, puis déclenchement manuel du mode silencieux avec une version factice plus récente) avant toute diffusion à Bob ou à un nouveau joueur.
+Tests unitaires : vérification de signature (paquet valide, hash altéré, signature invalide, manifeste non signé), résolution des trois états de réconciliation du §6, la condition de report quand `maintenance-status` renvoie `SafeToUpdate=false`, et le mode désinstallation (révocation réussie, révocation en échec avec suppression locale quand même, refus si session active). Validation réelle sur le PC de Steven en premier (installation par le nouvel exécutable unique, déclenchement manuel du mode silencieux avec une version factice plus récente, puis désinstallation complète) avant toute diffusion à Bob ou à un nouveau joueur.
