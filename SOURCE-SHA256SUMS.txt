@@ -54,7 +54,7 @@ d3d53358d65812c6c58e927f345730a806569ab1584943eb1491c55186f7d314 *docs/operation
 cad4c1cee1f07dba632271e3be1cbc0b2b03b189427c491b37d50439e4ffa974 *docs/operations/PHASE3-INTEGRATED-CLIENT.md
 e3699479186ff2753065f2159ad26c61575375dde4f7d0dc3ba0a95f3b02f065 *docs/operations/PILOT-CONSOLIDATION-2026-08-07.md
 cd2fb5e82425edb4745c4e9a2d87aad40c9ed8f9c7383b7fb170450191e1885e *docs/operations/PREPARATION-ENVOI-BOB.md
-37c31d16d4bbd9c9f69ff45b77e29f4ca8de87fe95dccccc0d9078d799985957 *docs/operations/REPLACE-PRIMARY-WORLD.md
+fce00d3ad1863b54bea3434deb133fd7b0294d1a68c4298fe152eb67113ee039 *docs/operations/REPLACE-PRIMARY-WORLD.md
 61f78de5b53265cb8b4e23595e510f99bce8c1980f201cc679c1d7bd643c0a3e *docs/superpowers/plans/2026-08-09-permanent-local-slot-implementation.md
 9bf52827cc9e7c00c74ab8f8bf4b522eb70dbd2c67bd4e8754795845dabd23b7 *docs/superpowers/specs/2026-08-09-permanent-local-slot-design.md
 c6f4cd9c8dbf0719aaee568a96ded438d860a216626f26ffa23abb1484098d41 *docs/superpowers/specs/2026-08-09-v1-world-hub-ux-updates-exporter-design.md
