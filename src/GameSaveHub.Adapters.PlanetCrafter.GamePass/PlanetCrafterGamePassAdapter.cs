@@ -809,23 +809,6 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
             return ImportFailed("Résolution physique du chemin impossible : " + exception.Message);
         }
 
-        IReadOnlyList<string> recoveryErrors;
-        try
-        {
-            recoveryErrors = await RecoverInterruptedManagedReplacementSessionsAsync(
-                preImportBackupOutputRoot,
-                detection.WgsRoot,
-                cancellationToken);
-        }
-        catch (Exception exception) when (IsPathValidationException(exception))
-        {
-            return ImportFailed("Validation sûre des sessions interrompues impossible : " + exception.Message);
-        }
-        if (recoveryErrors.Count > 0)
-        {
-            return ImportFailed(["Une activation interrompue n'a pas pu être réconciliée sans perte.", .. recoveryErrors]);
-        }
-
         LocalStorageInspection current;
         try
         {
@@ -891,11 +874,6 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         var previousHash = await FileSafety.ComputeSha256Async(targetBlob, cancellationToken);
         var temporary = Path.Combine(Path.GetDirectoryName(targetBlob)!, $".gsh-managed-import-{Guid.NewGuid():N}.tmp");
         var writePerformed = false;
-        string? replacementSessionDirectory = null;
-        string? evictedGenerationBackup = null;
-        string? displacedCandidateBackup = null;
-        var unexpectedEvictionDetected = false;
-        var staleCasRestored = false;
         try
         {
             await WriteBytesWithFlushAsync(payload, temporary, cancellationToken);
@@ -938,96 +916,12 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 throw new IOException("Le blob physique du slot permanent a tourné juste avant l'écriture.");
             }
 
-            var metadataPath = await FindContainerMetadataForManagedTargetAsync(
-                targetBlob,
-                baseline.Target.LogicalName,
-                cancellationToken);
-            string finalHash;
-            await using (var metadataLock = new FileStream(
-                             metadataPath,
-                             FileMode.Open,
-                             FileAccess.Read,
-                             FileShare.None,
-                             16 * 1024,
-                             FileOptions.Asynchronous | FileOptions.SequentialScan))
-            {
-                var lockedMetadata = await ReadAllBytesFromLockedStreamAsync(metadataLock, cancellationToken);
-                if (!ContainerMetadataPointsAtBlob(
-                        metadataPath,
-                        lockedMetadata,
-                        baseline.Target.LogicalName,
-                        targetBlob))
-                {
-                    throw new IOException("Le pointeur WGS du slot permanent a tourné avant l'acquisition du verrou.");
-                }
-
-                await using var targetLock = new FileStream(
-                    targetBlob,
-                    FileMode.Open,
-                    FileAccess.Read,
-                    FileShare.Read | FileShare.Delete,
-                    128 * 1024,
-                    FileOptions.Asynchronous | FileOptions.SequentialScan);
-                var compareHash = await ComputeSha256FromLockedStreamAsync(targetLock, cancellationToken);
-                if (!compareHash.Equals(baseline.Target.BeforePayloadSha256, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new IOException("Le slot permanent a changé pendant l'acquisition du verrou exclusif.");
-                }
-
-                var confirmedMetadata = await ReadAllBytesFromLockedStreamAsync(metadataLock, cancellationToken);
-                if (!lockedMetadata.AsSpan().SequenceEqual(confirmedMetadata) ||
-                    !ContainerMetadataPointsAtBlob(
-                        metadataPath,
-                        confirmedMetadata,
-                        baseline.Target.LogicalName,
-                        targetBlob))
-                {
-                    throw new IOException("Le pointeur WGS du slot permanent a changé pendant le verrouillage.");
-                }
-                if (ProbeProcesses().Count > 0)
-                {
-                    throw new IOException("Le jeu a été lancé juste avant la mutation du slot permanent.");
-                }
-
-                cancellationToken.ThrowIfCancellationRequested();
-                replacementSessionDirectory = Path.Combine(
-                    preImportSnapshot.SnapshotDirectory,
-                    $"managed-replacement-{Guid.NewGuid():N}");
-                Directory.CreateDirectory(replacementSessionDirectory);
-                evictedGenerationBackup = Path.Combine(replacementSessionDirectory, "evicted-generation.blob");
-                displacedCandidateBackup = Path.Combine(replacementSessionDirectory, "displaced-candidate.blob");
-                var session = new ManagedReplacementSession(
-                    1,
-                    FileSafety.GetSafeRelativePath(detection.WgsRoot, targetBlob),
-                    baseline.Target.BeforePayloadSha256,
-                    importedHash,
-                    DateTimeOffset.UtcNow);
-                await WriteDurableJsonMarkerAsync(
-                    Path.Combine(replacementSessionDirectory, "prepared.json"),
-                    session,
-                    cancellationToken);
-                writePerformed = true;
-                ActivateStagedFileAtomically(temporary, targetBlob, evictedGenerationBackup);
-                var evictedHash = await FileSafety.ComputeSha256Async(evictedGenerationBackup, CancellationToken.None);
-                if (!evictedHash.Equals(baseline.Target.BeforePayloadSha256, StringComparison.OrdinalIgnoreCase))
-                {
-                    unexpectedEvictionDetected = true;
-                    RestoreEvictedGenerationAtomically(
-                        evictedGenerationBackup,
-                        targetBlob,
-                        displacedCandidateBackup,
-                        evictedHash,
-                        importedHash);
-                    staleCasRestored = true;
-                    await WriteDurableJsonMarkerAsync(
-                        Path.Combine(replacementSessionDirectory, "stale-cas-restored.json"),
-                        session,
-                        CancellationToken.None);
-                    throw new IOException(
-                        "STALE-CAS : une autre génération a gagné après le hash CAS ; elle a été restaurée et le candidat rejeté a été préservé.");
-                }
-                finalHash = await FileSafety.ComputeSha256Async(targetBlob, cancellationToken);
-            }
+            // Écriture atomique : un crash entre ces deux lignes laisse le contenu précédent intact
+            // (le déplacement n'a jamais eu lieu) ; TransferTransitionGate garantit qu'aucune autre
+            // opération de slot ne s'exécute en parallèle sur cette même machine pendant ce temps.
+            File.Move(temporary, targetBlob, overwrite: true);
+            writePerformed = true;
+            var finalHash = await FileSafety.ComputeSha256Async(targetBlob, cancellationToken);
             if (!finalHash.Equals(importedHash, StringComparison.OrdinalIgnoreCase))
             {
                 throw new IOException("Le hash après remplacement ne correspond pas au payload préparé.");
@@ -1059,18 +953,6 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 throw new IOException("Le slot permanent est invalide après le remplacement : " + string.Join("; ", importedErrors));
             }
 
-            var completedSession = new ManagedReplacementSession(
-                1,
-                FileSafety.GetSafeRelativePath(detection.WgsRoot, targetBlob),
-                baseline.Target.BeforePayloadSha256,
-                importedHash,
-                DateTimeOffset.UtcNow);
-            await WriteDurableJsonMarkerAsync(
-                Path.Combine(replacementSessionDirectory!, "completed.json"),
-                completedSession,
-                CancellationToken.None);
-            File.Delete(evictedGenerationBackup!);
-
             return new PortableImportResult(
                 true,
                 importedWorld.LogicalName,
@@ -1080,118 +962,24 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
                 importedHash,
                 []);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
         {
-            var errors = new List<string>
-            {
-                exception is OperationCanceledException
-                    ? "OPÉRATION PRINCIPALE ANNULÉE : " + exception.Message
-                    : $"ÉCHEC PRINCIPAL ({exception.GetType().Name}) : {exception.Message}"
-            };
-            if (!writePerformed && File.Exists(temporary))
+            if (!writePerformed && File.Exists(temporary)) File.Delete(temporary);
+            var errors = new List<string> { exception.Message };
+            if (writePerformed)
             {
                 try
                 {
-                    File.Delete(temporary);
+                    await RollBackLogicalWorldFromSnapshotAsync(
+                        preImportSnapshot.SnapshotDirectory,
+                        target.LogicalName,
+                        targetBlob,
+                        cancellationToken);
+                    errors.Add("Le contenu précédent du slot permanent a été restauré automatiquement après l'échec.");
                 }
-                catch (Exception cleanupException)
+                catch (Exception rollbackException) when (rollbackException is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException)
                 {
-                    errors.Add("Échec du nettoyage du staging avant mutation : " + cleanupException.Message);
-                }
-            }
-            if (writePerformed)
-            {
-                if (!unexpectedEvictionDetected &&
-                    evictedGenerationBackup is not null &&
-                    displacedCandidateBackup is not null &&
-                    File.Exists(evictedGenerationBackup))
-                {
-                    try
-                    {
-                        var evictedHash = await FileSafety.ComputeSha256Async(
-                            evictedGenerationBackup,
-                            CancellationToken.None);
-                        if (!evictedHash.Equals(baseline.Target.BeforePayloadSha256, StringComparison.OrdinalIgnoreCase))
-                        {
-                            unexpectedEvictionDetected = true;
-                            RestoreEvictedGenerationAtomically(
-                                evictedGenerationBackup,
-                                targetBlob,
-                                displacedCandidateBackup,
-                                evictedHash,
-                                importedHash);
-                            staleCasRestored = true;
-                            if (replacementSessionDirectory is not null)
-                            {
-                                await WriteDurableJsonMarkerAsync(
-                                    Path.Combine(replacementSessionDirectory, "stale-cas-restored.json"),
-                                    new ManagedReplacementSession(
-                                        1,
-                                        FileSafety.GetSafeRelativePath(detection.WgsRoot, targetBlob),
-                                        baseline.Target.BeforePayloadSha256,
-                                        importedHash,
-                                        DateTimeOffset.UtcNow),
-                                    CancellationToken.None);
-                            }
-                        }
-                    }
-                    catch (Exception staleRecoveryException)
-                    {
-                        unexpectedEvictionDetected = true;
-                        errors.Add(
-                            $"ÉCHEC DE RESTAURATION STALE-CAS ({staleRecoveryException.GetType().Name}) : {staleRecoveryException.Message}");
-                    }
-                }
-                if (unexpectedEvictionDetected)
-                {
-                    errors.Add(staleCasRestored
-                        ? $"STALE-CAS RESTAURÉ : la génération concurrente a été replacée au chemin cible et le candidat rejeté est préservé ici : {displacedCandidateBackup}"
-                        : $"STALE-CAS À RÉCUPÉRER : le backup de la génération concurrente est préservé ici : {evictedGenerationBackup}");
-                }
-                else
-                {
-                    try
-                    {
-                        if (evictedGenerationBackup is not null &&
-                            displacedCandidateBackup is not null &&
-                            File.Exists(evictedGenerationBackup))
-                        {
-                            var evictedHash = await FileSafety.ComputeSha256Async(evictedGenerationBackup, CancellationToken.None);
-                            RestoreEvictedGenerationAtomically(
-                                evictedGenerationBackup,
-                                targetBlob,
-                                displacedCandidateBackup,
-                                evictedHash,
-                                importedHash);
-                        }
-                        var quarantineDirectory = await RestoreFullSnapshotAsync(
-                            preImportSnapshot.SnapshotDirectory,
-                            detection.WgsRoot,
-                            CancellationToken.None);
-                        if (replacementSessionDirectory is not null)
-                        {
-                            await WriteDurableJsonMarkerAsync(
-                                Path.Combine(replacementSessionDirectory, "rolled-back.json"),
-                                new ManagedReplacementSession(
-                                    1,
-                                    FileSafety.GetSafeRelativePath(detection.WgsRoot, targetBlob),
-                                    baseline.Target.BeforePayloadSha256,
-                                    importedHash,
-                                    DateTimeOffset.UtcNow),
-                                CancellationToken.None);
-                        }
-                        if (evictedGenerationBackup is not null && File.Exists(evictedGenerationBackup))
-                        {
-                            File.Delete(evictedGenerationBackup);
-                        }
-                        errors.Add(quarantineDirectory is null
-                            ? "ROLLBACK RÉUSSI : le snapshot pré-import complet a été restauré après l'échec principal."
-                            : $"ROLLBACK RÉUSSI : le snapshot pré-import complet a été restauré et les ajouts WGS ont été préservés en quarantaine : {quarantineDirectory}");
-                    }
-                    catch (Exception rollbackException)
-                    {
-                        errors.Add($"ÉCHEC DU ROLLBACK AUTOMATIQUE ({rollbackException.GetType().Name}) : {rollbackException.Message}");
-                    }
+                    errors.Add("ÉCHEC DU ROLLBACK AUTOMATIQUE : " + rollbackException.Message);
                 }
             }
             return new PortableImportResult(
@@ -2192,275 +1980,6 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         return Path.Combine(directory, stableName);
     }
 
-    private static async Task<string> FindContainerMetadataForManagedTargetAsync(
-        string targetBlob,
-        string logicalName,
-        CancellationToken cancellationToken)
-    {
-        var targetDirectory = Path.GetDirectoryName(targetBlob)
-            ?? throw new InvalidDataException("Le blob cible WGS n'a pas de dossier parent.");
-        var matches = new List<string>();
-        foreach (var metadataPath in Directory
-                     .EnumerateFiles(targetDirectory, "container.*", SearchOption.TopDirectoryOnly)
-                     .Order(StringComparer.OrdinalIgnoreCase))
-        {
-            var metadataInfo = new FileInfo(metadataPath);
-            FileSafety.RejectReparsePoint(metadataInfo);
-            var metadata = await File.ReadAllBytesAsync(metadataPath, cancellationToken);
-            if (ContainerMetadataPointsAtBlob(metadataPath, metadata, logicalName, targetBlob))
-            {
-                matches.Add(metadataPath);
-            }
-        }
-
-        return matches.Count == 1
-            ? matches[0]
-            : throw new InvalidDataException(
-                $"Le conteneur WGS du slot logique '{logicalName}' est absent ou ambigu au moment du verrouillage.");
-    }
-
-    private static bool ContainerMetadataPointsAtBlob(
-        string metadataPath,
-        byte[] metadata,
-        string logicalName,
-        string expectedBlob)
-    {
-        if (metadata.Length < 8) return false;
-        var entryCount = BitConverter.ToInt32(metadata, 4);
-        if (entryCount is < 0 or > 1024 || metadata.Length < 8 + entryCount * 160) return false;
-
-        var matchingEntries = 0;
-        for (var index = 0; index < entryCount; index++)
-        {
-            var offset = 8 + index * 160;
-            if (!ReadNullTerminatedUnicode(metadata.AsSpan(offset, 128)).Equals(logicalName, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var resolvedPath = ResolveCurrentBlobPath(metadataPath, metadata, offset);
-            if (!Path.GetFullPath(resolvedPath).Equals(Path.GetFullPath(expectedBlob), StringComparison.OrdinalIgnoreCase) ||
-                !File.Exists(resolvedPath))
-            {
-                return false;
-            }
-            matchingEntries++;
-        }
-        return matchingEntries == 1;
-    }
-
-    private static async Task<byte[]> ReadAllBytesFromLockedStreamAsync(
-        FileStream stream,
-        CancellationToken cancellationToken)
-    {
-        if (stream.Length > int.MaxValue) throw new InvalidDataException("Les métadonnées WGS sont trop volumineuses.");
-        var bytes = new byte[(int)stream.Length];
-        stream.Position = 0;
-        await stream.ReadExactlyAsync(bytes, cancellationToken);
-        return bytes;
-    }
-
-    private static async Task<string> ComputeSha256FromLockedStreamAsync(
-        FileStream stream,
-        CancellationToken cancellationToken)
-    {
-        stream.Position = 0;
-        var hash = await System.Security.Cryptography.SHA256.HashDataAsync(stream, cancellationToken);
-        stream.Position = 0;
-        return Convert.ToHexStringLower(hash);
-    }
-
-    private static void ActivateStagedFileAtomically(
-        string stagingPath,
-        string targetPath,
-        string evictedGenerationBackupPath)
-    {
-        File.Replace(stagingPath, targetPath, evictedGenerationBackupPath, ignoreMetadataErrors: false);
-    }
-
-    private static void RestoreEvictedGenerationAtomically(
-        string evictedGenerationBackupPath,
-        string targetPath,
-        string displacedCandidateBackupPath,
-        string expectedRestoredHash,
-        string expectedDisplacedHash)
-    {
-        File.Replace(
-            evictedGenerationBackupPath,
-            targetPath,
-            displacedCandidateBackupPath,
-            ignoreMetadataErrors: false);
-        var restoredHash = Convert.ToHexStringLower(
-            System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(targetPath)));
-        var displacedHash = Convert.ToHexStringLower(
-            System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(displacedCandidateBackupPath)));
-        if (!restoredHash.Equals(expectedRestoredHash, StringComparison.OrdinalIgnoreCase) ||
-            !displacedHash.Equals(expectedDisplacedHash, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new IOException("La restauration atomique des générations concurrentes n'a pas préservé les hashes attendus.");
-        }
-    }
-
-    private static async Task WriteDurableJsonMarkerAsync<T>(
-        string markerPath,
-        T value,
-        CancellationToken cancellationToken)
-    {
-        var temporaryMarker = markerPath + $".{Guid.NewGuid():N}.tmp";
-        try
-        {
-            var bytes = System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, JsonOptions));
-            await WriteBytesWithFlushAsync(bytes, temporaryMarker, cancellationToken);
-            File.Move(temporaryMarker, markerPath, overwrite: false);
-        }
-        finally
-        {
-            if (File.Exists(temporaryMarker)) File.Delete(temporaryMarker);
-        }
-    }
-
-    private static async Task<IReadOnlyList<string>> RecoverInterruptedManagedReplacementSessionsAsync(
-        string backupOutputRoot,
-        string currentWgsRoot,
-        CancellationToken cancellationToken)
-    {
-        if (!Directory.Exists(backupOutputRoot)) return [];
-
-        var fullBackupRoot = Path.GetFullPath(backupOutputRoot);
-        var physicalBackupRoot = FileSafety.ResolveDirectoryLinks(fullBackupRoot);
-        var physicalWgsRoot = FileSafety.ResolveDirectoryLinks(currentWgsRoot);
-        var errors = new List<string>();
-        foreach (var snapshotPath in Directory.EnumerateDirectories(fullBackupRoot))
-        {
-            var snapshotDirectory = new DirectoryInfo(snapshotPath);
-            FileSafety.RejectReparsePoint(snapshotDirectory);
-            var physicalSnapshot = FileSafety.ResolveDirectoryLinks(snapshotDirectory.FullName);
-            if (!FileSafety.IsSameOrDescendant(physicalSnapshot, physicalBackupRoot) ||
-                FileSafety.IsSameOrDescendant(physicalSnapshot, physicalWgsRoot) ||
-                FileSafety.IsSameOrDescendant(physicalWgsRoot, physicalSnapshot))
-            {
-                errors.Add($"Session de remplacement hors racine sûre : {snapshotDirectory.FullName}");
-                continue;
-            }
-
-            foreach (var sessionPath in Directory.EnumerateDirectories(
-                         snapshotDirectory.FullName,
-                         "managed-replacement-*",
-                         SearchOption.TopDirectoryOnly))
-            {
-                var sessionDirectory = new DirectoryInfo(sessionPath);
-                FileSafety.RejectReparsePoint(sessionDirectory);
-                var physicalSession = FileSafety.ResolveDirectoryLinks(sessionDirectory.FullName);
-                if (!FileSafety.IsSameOrDescendant(physicalSession, physicalSnapshot))
-                {
-                    errors.Add($"Session de remplacement hors snapshot : {sessionDirectory.FullName}");
-                    continue;
-                }
-
-                var preparedMarker = Path.Combine(sessionDirectory.FullName, "prepared.json");
-                if (!File.Exists(preparedMarker) ||
-                    File.Exists(Path.Combine(sessionDirectory.FullName, "completed.json")) ||
-                    File.Exists(Path.Combine(sessionDirectory.FullName, "rolled-back.json")) ||
-                    File.Exists(Path.Combine(sessionDirectory.FullName, "stale-cas-restored.json")) ||
-                    File.Exists(Path.Combine(sessionDirectory.FullName, "recovered.json")) ||
-                    File.Exists(Path.Combine(sessionDirectory.FullName, "abandoned.json")))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    FileSafety.RejectReparsePoint(new FileInfo(preparedMarker));
-                    await using var sessionLock = new FileStream(
-                        preparedMarker,
-                        FileMode.Open,
-                        FileAccess.Read,
-                        FileShare.None,
-                        16 * 1024,
-                        FileOptions.Asynchronous | FileOptions.SequentialScan);
-                    var session = await JsonSerializer.DeserializeAsync<ManagedReplacementSession>(
-                        sessionLock,
-                        JsonOptions,
-                        cancellationToken);
-                    if (session is null ||
-                        session.SchemaVersion != 1 ||
-                        session.ExpectedBeforeSha256.Length != 64 ||
-                        session.CandidateSha256.Length != 64)
-                    {
-                        errors.Add($"Journal de remplacement invalide : {preparedMarker}");
-                        continue;
-                    }
-
-                    var targetPath = ResolveContainedPath(currentWgsRoot, session.TargetRelativePath);
-                    var snapshotValidation = await ValidateSnapshotSourceAsync(
-                        snapshotDirectory.FullName,
-                        Path.Combine(snapshotDirectory.FullName, "snapshot-manifest.json"),
-                        cancellationToken);
-                    var snapshotTarget = snapshotValidation.Manifest?.Files.SingleOrDefault(file =>
-                        file.RelativePath.Equals(session.TargetRelativePath, StringComparison.OrdinalIgnoreCase));
-                    if (snapshotTarget is null ||
-                        !snapshotTarget.Sha256.Equals(session.ExpectedBeforeSha256, StringComparison.OrdinalIgnoreCase))
-                    {
-                        errors.Add($"La session ne correspond pas au snapshot complet validé : {sessionDirectory.FullName}");
-                        continue;
-                    }
-                    var evictedBackup = Path.Combine(sessionDirectory.FullName, "evicted-generation.blob");
-                    var displacedCandidate = Path.Combine(sessionDirectory.FullName, "displaced-candidate.blob");
-                    if (!File.Exists(evictedBackup))
-                    {
-                        if (!File.Exists(targetPath) ||
-                            !session.ExpectedBeforeSha256.Equals(
-                                await FileSafety.ComputeSha256Async(targetPath, cancellationToken),
-                                StringComparison.OrdinalIgnoreCase))
-                        {
-                            errors.Add($"Session préparée sans backup et cible non initiale : {sessionDirectory.FullName}");
-                            continue;
-                        }
-                        await WriteDurableJsonMarkerAsync(
-                            Path.Combine(sessionDirectory.FullName, "abandoned.json"),
-                            session,
-                            CancellationToken.None);
-                        continue;
-                    }
-                    FileSafety.RejectReparsePoint(new FileInfo(evictedBackup));
-                    if (File.Exists(displacedCandidate))
-                    {
-                        errors.Add($"Un candidat déplacé non réconcilié existe déjà : {sessionDirectory.FullName}");
-                        continue;
-                    }
-                    if (!File.Exists(targetPath))
-                    {
-                        errors.Add($"Cible absente pour la session récupérable : {sessionDirectory.FullName}");
-                        continue;
-                    }
-
-                    var currentHash = await FileSafety.ComputeSha256Async(targetPath, cancellationToken);
-                    if (!currentHash.Equals(session.CandidateSha256, StringComparison.OrdinalIgnoreCase))
-                    {
-                        errors.Add($"La cible a encore changé depuis l'activation interrompue : {sessionDirectory.FullName}");
-                        continue;
-                    }
-                    var evictedHash = await FileSafety.ComputeSha256Async(evictedBackup, cancellationToken);
-                    RestoreEvictedGenerationAtomically(
-                        evictedBackup,
-                        targetPath,
-                        displacedCandidate,
-                        evictedHash,
-                        session.CandidateSha256);
-                    await WriteDurableJsonMarkerAsync(
-                        Path.Combine(sessionDirectory.FullName, "recovered.json"),
-                        session,
-                        CancellationToken.None);
-                }
-                catch (Exception exception)
-                {
-                    errors.Add($"Échec de récupération de {sessionDirectory.FullName} ({exception.GetType().Name}) : {exception.Message}");
-                }
-            }
-        }
-        return errors;
-    }
-
     private static bool PlayersEquivalent(IReadOnlyList<DiscoveredPlayer> left, IReadOnlyList<DiscoveredPlayer> right) =>
         left.OrderBy(player => player.Id).SequenceEqual(right.OrderBy(player => player.Id));
 
@@ -2892,118 +2411,6 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
     private static bool IsPathValidationException(Exception exception) =>
         exception is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or NotSupportedException;
 
-    private static async Task<string?> RestoreFullSnapshotAsync(
-        string snapshotDirectory,
-        string currentWgsRoot,
-        CancellationToken cancellationToken)
-    {
-        var snapshotRoot = Path.GetFullPath(snapshotDirectory);
-        var physicalSnapshotRoot = FileSafety.ResolveDirectoryLinks(snapshotRoot);
-        var physicalCurrentWgsRoot = FileSafety.ResolveDirectoryLinks(currentWgsRoot);
-        if (FileSafety.IsSameOrDescendant(physicalSnapshotRoot, physicalCurrentWgsRoot) ||
-            FileSafety.IsSameOrDescendant(physicalCurrentWgsRoot, physicalSnapshotRoot))
-        {
-            throw new InvalidDataException("Le snapshot de rollback n'est pas physiquement séparé du stockage WGS courant.");
-        }
-        var validation = await ValidateSnapshotSourceAsync(
-            snapshotRoot,
-            Path.Combine(snapshotRoot, "snapshot-manifest.json"),
-            cancellationToken);
-        if (validation.Manifest is null)
-        {
-            throw new InvalidDataException("Snapshot de rollback invalide : " + string.Join("; ", validation.Errors));
-        }
-
-        var snapshotWgs = Path.Combine(snapshotRoot, "wgs");
-        var expectedPaths = validation.Manifest.Files
-            .Select(file => file.RelativePath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var unexpectedPaths = EnumerateSafeFiles(currentWgsRoot)
-            .Select(path => FileSafety.GetSafeRelativePath(currentWgsRoot, path))
-            .Where(path => !expectedPaths.Contains(path))
-            .Order(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        string? quarantineDirectory = null;
-        if (unexpectedPaths.Length > 0)
-        {
-            quarantineDirectory = Path.Combine(
-                snapshotRoot,
-                "rollback-quarantine",
-                $"{DateTimeOffset.UtcNow:yyyyMMddTHHmmssZ}-{Guid.NewGuid():N}");
-            var quarantineWgs = Path.Combine(quarantineDirectory, "wgs");
-            Directory.CreateDirectory(quarantineWgs);
-            var physicalQuarantineWgs = FileSafety.ResolveDirectoryLinks(quarantineWgs);
-            if (!FileSafety.IsSameOrDescendant(physicalQuarantineWgs, physicalSnapshotRoot) ||
-                FileSafety.IsSameOrDescendant(physicalQuarantineWgs, physicalCurrentWgsRoot) ||
-                FileSafety.IsSameOrDescendant(physicalCurrentWgsRoot, physicalQuarantineWgs))
-            {
-                throw new InvalidDataException("La quarantaine de rollback n'est pas physiquement contenue hors WGS dans le snapshot.");
-            }
-            foreach (var relativePath in unexpectedPaths)
-            {
-                var source = ResolveContainedPath(currentWgsRoot, relativePath);
-                var destination = ResolveContainedPath(quarantineWgs, relativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                var sourceHash = await FileSafety.ComputeSha256Async(source, cancellationToken);
-                File.Move(source, destination, overwrite: false);
-                var quarantineHash = await FileSafety.ComputeSha256Async(destination, cancellationToken);
-                if (!sourceHash.Equals(quarantineHash, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new IOException($"La quarantaine n'a pas préservé le hash de l'ajout WGS : {relativePath}");
-                }
-            }
-        }
-
-        var staged = new List<(string Temporary, string Destination, string ExpectedSha256)>();
-        try
-        {
-            foreach (var file in validation.Manifest.Files)
-            {
-                var source = ResolveContainedPath(snapshotWgs, file.RelativePath);
-                var destination = ResolveContainedPath(currentWgsRoot, file.RelativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                var temporary = Path.Combine(Path.GetDirectoryName(destination)!, $".gsh-full-rollback-{Guid.NewGuid():N}.tmp");
-                await CopyWithFlushAsync(source, temporary, cancellationToken);
-                var stagedHash = await FileSafety.ComputeSha256Async(temporary, cancellationToken);
-                if (!stagedHash.Equals(file.Sha256, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new IOException($"Hash de staging de rollback invalide : {file.RelativePath}");
-                }
-                staged.Add((temporary, destination, file.Sha256));
-            }
-
-            foreach (var file in staged)
-            {
-                File.Move(file.Temporary, file.Destination, overwrite: true);
-            }
-
-            var actualPaths = EnumerateSafeFiles(currentWgsRoot)
-                .Select(path => FileSafety.GetSafeRelativePath(currentWgsRoot, path))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if (!expectedPaths.SetEquals(actualPaths))
-            {
-                throw new IOException("Le rollback n'a pas restauré la liste complète des fichiers WGS.");
-            }
-            foreach (var file in validation.Manifest.Files)
-            {
-                var destination = ResolveContainedPath(currentWgsRoot, file.RelativePath);
-                var actualHash = await FileSafety.ComputeSha256Async(destination, cancellationToken);
-                if (!actualHash.Equals(file.Sha256, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new IOException($"Le rollback n'a pas restauré le hash attendu : {file.RelativePath}");
-                }
-            }
-        }
-        finally
-        {
-            foreach (var file in staged)
-            {
-                if (File.Exists(file.Temporary)) File.Delete(file.Temporary);
-            }
-        }
-        return quarantineDirectory;
-    }
-
     private static async Task<(ImportBaselineManifest? Manifest, IReadOnlyList<string> Errors)> ValidateImportBaselineSourceAsync(
         string baselineDirectory,
         CancellationToken cancellationToken)
@@ -3146,10 +2553,4 @@ public sealed class PlanetCrafterGamePassAdapter(PlanetCrafterGamePassOptions? o
         new NotSupportedException("Fonction désactivée : le jalon expérimental WGS/transfert d'hôte n'est pas validé."));
 
     private sealed record LogicalFileState(string Sha256, long Length);
-    private sealed record ManagedReplacementSession(
-        int SchemaVersion,
-        string TargetRelativePath,
-        string ExpectedBeforeSha256,
-        string CandidateSha256,
-        DateTimeOffset CreatedAtUtc);
 }

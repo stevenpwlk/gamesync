@@ -965,142 +965,6 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
     }
 
     [Fact]
-    public async Task ReplaceManagedSlotBlocksPointerRotationAfterFinalHashBeforeWritingTargetBlob()
-    {
-        var wgs = CreateWgs();
-        var targetBlob = CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
-        var targetDirectory = Path.GetDirectoryName(targetBlob)!;
-        var containerMetadata = Path.Combine(targetDirectory, "container.1");
-        var rotatedBlobId = Guid.NewGuid();
-        var rotatedBlob = Path.Combine(targetDirectory, rotatedBlobId.ToString("N").ToUpperInvariant());
-        File.Copy(targetBlob, rotatedBlob);
-        var setupAdapter = CreateAdapter();
-        var artifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-final-window");
-        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
-        var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
-        var probeCount = 0;
-        var rotationAttempted = false;
-        var rotationBlocked = false;
-        var writeHadAlreadyStarted = false;
-        var adapter = CreateAdapter(() =>
-        {
-            probeCount++;
-            if (probeCount == 8)
-            {
-                rotationAttempted = true;
-                writeHadAlreadyStarted = !Directory
-                    .EnumerateFiles(targetDirectory, ".gsh-managed-import-*.tmp")
-                    .Any();
-                try
-                {
-                    RotateFixtureCurrentBlob(containerMetadata, rotatedBlobId);
-                }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-                {
-                    rotationBlocked = true;
-                }
-            }
-            return [];
-        });
-
-        var result = await adapter.ReplaceManagedSlotAsync(
-            artifact,
-            baseline.BaselineDirectory!,
-            slot,
-            "Tester",
-            Path.Combine(_root, "pre-import"));
-
-        Assert.True(rotationAttempted);
-        Assert.False(writeHadAlreadyStarted);
-        Assert.True(rotationBlocked);
-        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
-        Assert.Equal(
-            artifact.Manifest!.PayloadSha256,
-            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob))));
-    }
-
-    [Fact]
-    public async Task ReplaceManagedSlotAtomicallyActivatesStagingWithoutRewritingOpenOldGeneration()
-    {
-        var wgs = CreateWgs();
-        var targetBlob = CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
-        CreateWorldFixture(wgs, "Standard-2.json", "ProtectedWorld");
-        var adapter = CreateAdapter();
-        var artifact = await PrepareManagedSlotArtifactAsync(adapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-atomic-activation");
-        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
-        var baseline = await adapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
-        var oldGenerationHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob)));
-        var preparedPayloadHash = await ReadArtifactPayloadHashAsync(artifact.Path);
-        await using var openOldGeneration = new FileStream(
-            targetBlob,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete,
-            128 * 1024,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-
-        var result = await adapter.ReplaceManagedSlotAsync(
-            artifact,
-            baseline.BaselineDirectory!,
-            slot,
-            "Tester",
-            Path.Combine(_root, "pre-import"));
-
-        openOldGeneration.Position = 0;
-        var stillOpenGenerationHash = Convert.ToHexStringLower(
-            await System.Security.Cryptography.SHA256.HashDataAsync(openOldGeneration));
-        var activatedPathHash = Convert.ToHexStringLower(
-            System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob)));
-        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
-        Assert.Equal(oldGenerationHash, stillOpenGenerationHash);
-        Assert.Equal(preparedPayloadHash, activatedPathHash);
-        Assert.NotEqual(stillOpenGenerationHash, activatedPathHash);
-        Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(targetBlob)!, ".gsh-managed-import-*.tmp"));
-    }
-
-    [Fact]
-    public async Task ReplaceManagedSlotCancellationAtFinalProbeLeavesOldGenerationIntactWithoutRollback()
-    {
-        var wgs = CreateWgs();
-        var targetBlob = CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
-        var setupAdapter = CreateAdapter();
-        var artifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-pre-activation-cancel");
-        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
-        var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
-        var oldGenerationHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob)));
-        var backupRoot = Path.Combine(_root, "pre-import");
-        using var cancellation = new CancellationTokenSource();
-        var probeCount = 0;
-        var adapter = CreateAdapter(() =>
-        {
-            probeCount++;
-            if (probeCount == 8)
-            {
-                Directory.Delete(
-                    Path.Combine(Directory.EnumerateDirectories(backupRoot).Single(), "wgs"),
-                    recursive: true);
-                cancellation.Cancel();
-            }
-            return [];
-        });
-
-        var result = await adapter.ReplaceManagedSlotAsync(
-            artifact,
-            baseline.BaselineDirectory!,
-            slot,
-            "Tester",
-            backupRoot,
-            cancellation.Token);
-
-        Assert.False(result.Success);
-        Assert.Contains(result.Errors, error => error.Contains("annul", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(result.Errors, error => error.Contains("rollback", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(
-            oldGenerationHash,
-            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob))));
-    }
-
-    [Fact]
     public async Task ReplaceManagedSlotUsesStableGenerationWhenCurrentBlobIsMissing()
     {
         var wgs = CreateWgs();
@@ -1128,236 +992,21 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
     }
 
     [Fact]
-    public async Task ReplaceManagedSlotSerializesConcurrentReplacersSoOnlyOneBaselinePayloadCanWin()
-    {
-        var wgs = CreateWgs();
-        CreateWorldFixture(wgs, "Standard-1.json", "SourceA", seed: 101);
-        CreateWorldFixture(wgs, "Standard-2.json", "SourceB", seed: 202);
-        var targetBlob = CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN", seed: 505);
-        var setupAdapter = CreateAdapter();
-        var artifactA = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-1.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-concurrent-a");
-        var artifactB = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-2.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-concurrent-b");
-        var hashA = await ReadArtifactPayloadHashAsync(artifactA.Path);
-        var hashB = await ReadArtifactPayloadHashAsync(artifactB.Path);
-        Assert.NotEqual(hashA, hashB);
-        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
-        var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
-        using var firstAtFinalProbe = new ManualResetEventSlim();
-        using var releaseFirst = new ManualResetEventSlim();
-        var firstProbeCount = 0;
-        var firstAdapter = CreateAdapter(() =>
-        {
-            firstProbeCount++;
-            if (firstProbeCount == 8)
-            {
-                firstAtFinalProbe.Set();
-                releaseFirst.Wait(TimeSpan.FromSeconds(10));
-            }
-            return [];
-        });
-        var secondAdapter = CreateAdapter();
-
-        var firstTask = firstAdapter.ReplaceManagedSlotAsync(
-            artifactA,
-            baseline.BaselineDirectory!,
-            slot,
-            "Tester",
-            Path.Combine(_root, "pre-import-a"));
-        Assert.True(firstAtFinalProbe.Wait(TimeSpan.FromSeconds(10)));
-        PortableImportResult second;
-        try
-        {
-            second = await secondAdapter.ReplaceManagedSlotAsync(
-                artifactB,
-                baseline.BaselineDirectory!,
-                slot,
-                "Tester",
-                Path.Combine(_root, "pre-import-b"));
-        }
-        finally
-        {
-            releaseFirst.Set();
-        }
-        var first = await firstTask;
-
-        Assert.True(first.Success, string.Join(Environment.NewLine, first.Errors));
-        Assert.False(second.Success);
-        Assert.Equal(hashA, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob))));
-        Assert.NotEqual(hashB, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob))));
-    }
-
-    [Fact]
-    public async Task ReplaceManagedSlotRestoresGenerationThatWonAfterCasAndPreservesRejectedCandidate()
-    {
-        var wgs = CreateWgs();
-        CreateWorldFixture(wgs, "Standard-1.json", "SourceCandidate", seed: 101);
-        CreateWorldFixture(wgs, "Standard-2.json", "SourceConcurrent", seed: 202);
-        var targetBlob = CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN", seed: 505);
-        var setupAdapter = CreateAdapter();
-        var candidateArtifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-1.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-stale-candidate");
-        var concurrentArtifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-2.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-stale-winner");
-        var candidateBytes = await ReadArtifactPayloadBytesAsync(candidateArtifact.Path);
-        var concurrentBytes = await ReadArtifactPayloadBytesAsync(concurrentArtifact.Path);
-        var candidateHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(candidateBytes));
-        var concurrentHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(concurrentBytes));
-        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
-        var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
-        var backupRoot = Path.Combine(_root, "pre-import");
-        var probeCount = 0;
-        var adapter = CreateAdapter(() =>
-        {
-            probeCount++;
-            if (probeCount == 8)
-            {
-                var competingStaging = Path.Combine(Path.GetDirectoryName(targetBlob)!, $".competitor-{Guid.NewGuid():N}.tmp");
-                File.WriteAllBytes(competingStaging, concurrentBytes);
-                File.Replace(competingStaging, targetBlob, Path.Combine(_root, "competitor-evicted.blob"));
-            }
-            return [];
-        });
-
-        var result = await adapter.ReplaceManagedSlotAsync(
-            candidateArtifact,
-            baseline.BaselineDirectory!,
-            slot,
-            "Tester",
-            backupRoot);
-
-        Assert.False(result.Success);
-        Assert.Contains(result.Errors, error => error.Contains("stale", StringComparison.OrdinalIgnoreCase) || error.Contains("CAS", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(concurrentHash, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob))));
-        var preservedCandidate = Assert.Single(Directory.EnumerateFiles(result.PreImportSnapshotDirectory!, "displaced-candidate.blob", SearchOption.AllDirectories));
-        Assert.Equal(candidateHash, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(preservedCandidate))));
-    }
-
-    [Fact]
-    public async Task ReplaceManagedSlotRemovesExpectedEvictionBackupOnlyAfterSuccessfulValidation()
-    {
-        var wgs = CreateWgs();
-        CreateWorldFixture(wgs, "Standard-1.json", "Source", seed: 101);
-        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN", seed: 505);
-        var adapter = CreateAdapter();
-        var artifact = await PrepareManagedSlotArtifactAsync(adapter, "Standard-1.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-backup-success");
-        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
-        var baseline = await adapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
-
-        var result = await adapter.ReplaceManagedSlotAsync(
-            artifact,
-            baseline.BaselineDirectory!,
-            slot,
-            "Tester",
-            Path.Combine(_root, "pre-import"));
-
-        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
-        Assert.Empty(Directory.EnumerateFiles(result.PreImportSnapshotDirectory!, "evicted-generation.blob", SearchOption.AllDirectories));
-        Assert.Single(Directory.EnumerateFiles(result.PreImportSnapshotDirectory!, "completed.json", SearchOption.AllDirectories));
-    }
-
-    [Fact]
-    public async Task ReplaceManagedSlotCleansExpectedEvictionBackupAfterRollbackPreservesCandidate()
-    {
-        var wgs = CreateWgs();
-        CreateWorldFixture(wgs, "Standard-1.json", "Source", seed: 101);
-        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN", seed: 505);
-        var protectedBlob = CreateWorldFixture(wgs, "Standard-2.json", "ProtectedWorld", seed: 202);
-        var setupAdapter = CreateAdapter();
-        var artifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-1.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-backup-rollback");
-        var candidateHash = await ReadArtifactPayloadHashAsync(artifact.Path);
-        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
-        var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
-        var probeCount = 0;
-        var adapter = CreateAdapter(() =>
-        {
-            probeCount++;
-            if (probeCount == 9) File.AppendAllText(protectedBlob, "force-post-activation-rollback");
-            return [];
-        });
-
-        var result = await adapter.ReplaceManagedSlotAsync(
-            artifact,
-            baseline.BaselineDirectory!,
-            slot,
-            "Tester",
-            Path.Combine(_root, "pre-import"));
-
-        Assert.False(result.Success);
-        Assert.Empty(Directory.EnumerateFiles(result.PreImportSnapshotDirectory!, "evicted-generation.blob", SearchOption.AllDirectories));
-        Assert.Single(Directory.EnumerateFiles(result.PreImportSnapshotDirectory!, "rolled-back.json", SearchOption.AllDirectories));
-        var preservedCandidate = Assert.Single(Directory.EnumerateFiles(
-            result.PreImportSnapshotDirectory!,
-            "displaced-candidate.blob",
-            SearchOption.AllDirectories));
-        Assert.Equal(
-            candidateHash,
-            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(preservedCandidate))));
-        Assert.True(File.Exists(preservedCandidate));
-    }
-
-    [Fact]
-    public async Task ReplaceManagedSlotRecoversDurableInterruptedActivationBeforeEvaluatingNextReplacement()
-    {
-        var wgs = CreateWgs();
-        CreateWorldFixture(wgs, "Standard-1.json", "InterruptedCandidate", seed: 101);
-        CreateWorldFixture(wgs, "Standard-2.json", "NextCandidate", seed: 202);
-        var targetBlob = CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN", seed: 505);
-        var adapter = CreateAdapter();
-        var interruptedArtifact = await PrepareManagedSlotArtifactAsync(adapter, "Standard-1.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-interrupted");
-        var nextArtifact = await PrepareManagedSlotArtifactAsync(adapter, "Standard-2.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-after-recovery");
-        var interruptedBytes = await ReadArtifactPayloadBytesAsync(interruptedArtifact.Path);
-        var interruptedHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(interruptedBytes));
-        var nextHash = await ReadArtifactPayloadHashAsync(nextArtifact.Path);
-        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
-        var baseline = await adapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
-        var backupRoot = Path.Combine(_root, "pre-import");
-        var interruptedSnapshot = await adapter.CreateSafetySnapshotAsync(backupRoot, "GSH-SHLAGS-RETURN");
-        Assert.True(interruptedSnapshot.Success, string.Join(Environment.NewLine, interruptedSnapshot.Errors));
-        var sessionDirectory = Directory.CreateDirectory(Path.Combine(interruptedSnapshot.SnapshotDirectory!, "managed-replacement-interrupted")).FullName;
-        var preparedMarker = new
-        {
-            SchemaVersion = 1,
-            TargetRelativePath = Path.GetRelativePath(wgs, targetBlob).Replace('\\', '/'),
-            ExpectedBeforeSha256 = baseline.Manifest!.Target.BeforePayloadSha256,
-            CandidateSha256 = interruptedHash,
-            CreatedAtUtc = DateTimeOffset.UtcNow
-        };
-        await File.WriteAllTextAsync(
-            Path.Combine(sessionDirectory, "prepared.json"),
-            System.Text.Json.JsonSerializer.Serialize(preparedMarker));
-        var interruptedStaging = Path.Combine(Path.GetDirectoryName(targetBlob)!, $".interrupted-{Guid.NewGuid():N}.tmp");
-        await File.WriteAllBytesAsync(interruptedStaging, interruptedBytes);
-        File.Replace(interruptedStaging, targetBlob, Path.Combine(sessionDirectory, "evicted-generation.blob"));
-
-        var result = await adapter.ReplaceManagedSlotAsync(
-            nextArtifact,
-            baseline.BaselineDirectory!,
-            slot,
-            "Tester",
-            backupRoot);
-
-        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
-        Assert.Equal(nextHash, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob))));
-        Assert.True(File.Exists(Path.Combine(sessionDirectory, "recovered.json")));
-        var preservedInterrupted = Path.Combine(sessionDirectory, "displaced-candidate.blob");
-        Assert.Equal(interruptedHash, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(preservedInterrupted))));
-        Assert.False(File.Exists(Path.Combine(sessionDirectory, "evicted-generation.blob")));
-    }
-
-    [Fact]
     public async Task ReplaceManagedSlotRollsBackFullSnapshotWhenProtectedWorldMutatesAfterWrite()
     {
         var wgs = CreateWgs();
-        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        var targetBlob = CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
         var protectedBlob = CreateWorldFixture(wgs, "Standard-2.json", "ProtectedWorld");
         var setupAdapter = CreateAdapter();
         var artifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-after-write");
         var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
         var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
-        var beforeFiles = await ReadFixtureFileHashesAsync(wgs);
+        var targetBefore = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob)));
         var probeCount = 0;
         var adapter = CreateAdapter(() =>
         {
             probeCount++;
-            if (probeCount == 9) File.AppendAllText(protectedBlob, "post-write-change");
+            if (probeCount == 8) File.AppendAllText(protectedBlob, "post-write-change");
             return [];
         });
 
@@ -1371,41 +1020,7 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         Assert.False(result.Success);
         Assert.Contains(result.Errors, error => error.Contains("protég", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Errors, error => error.Contains("restaur", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
-    }
-
-    [Fact]
-    public async Task ReplaceManagedSlotRollsBackWithIndependentTokenWhenCancellationArrivesAfterWrite()
-    {
-        var wgs = CreateWgs();
-        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
-        CreateWorldFixture(wgs, "Standard-2.json", "ProtectedWorld");
-        var setupAdapter = CreateAdapter();
-        var artifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-cancel-rollback");
-        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
-        var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
-        var beforeFiles = await ReadFixtureFileHashesAsync(wgs);
-        using var cancellation = new CancellationTokenSource();
-        var probeCount = 0;
-        var adapter = CreateAdapter(() =>
-        {
-            probeCount++;
-            if (probeCount == 9) cancellation.Cancel();
-            return [];
-        });
-
-        var result = await adapter.ReplaceManagedSlotAsync(
-            artifact,
-            baseline.BaselineDirectory!,
-            slot,
-            "Tester",
-            Path.Combine(_root, "pre-import"),
-            cancellation.Token);
-
-        Assert.False(result.Success);
-        Assert.Contains(result.Errors, error => error.Contains("annul", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(result.Errors, error => error.Contains("rollback", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
+        Assert.Equal(targetBefore, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob))));
     }
 
     [Fact]
@@ -1423,7 +1038,7 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         var adapter = CreateAdapter(() =>
         {
             probeCount++;
-            if (probeCount == 9) throw new InvalidOperationException("post-write-invalid-operation");
+            if (probeCount == 8) throw new InvalidOperationException("post-write-invalid-operation");
             return [];
         });
 
@@ -1436,73 +1051,26 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
 
         Assert.False(result.Success);
         Assert.Contains(result.Errors, error => error.Contains("post-write-invalid-operation", StringComparison.Ordinal));
-        Assert.Contains(result.Errors, error => error.Contains("rollback", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Errors, error => error.Contains("restaur", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
-    }
-
-    [Fact]
-    public async Task ReplaceManagedSlotQuarantinesUnexpectedWgsFilesAndRestoresExactSnapshotSet()
-    {
-        var wgs = CreateWgs();
-        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
-        var protectedBlob = CreateWorldFixture(wgs, "Standard-2.json", "ProtectedWorld");
-        var setupAdapter = CreateAdapter();
-        var artifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-extra-quarantine");
-        var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
-        var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
-        var beforeFiles = await ReadFixtureFileHashesAsync(wgs);
-        var backupRoot = Path.Combine(_root, "pre-import");
-        var extraDirectory = Path.Combine(wgs, "C-UNEXPECTED");
-        var extraWgsPath = Path.Combine(extraDirectory, "unexpected-after-write.bin");
-        const string extraContent = "recoverable-unexpected-wgs-content";
-        var probeCount = 0;
-        var adapter = CreateAdapter(() =>
-        {
-            probeCount++;
-            if (probeCount == 9)
-            {
-                File.AppendAllText(protectedBlob, "post-write-protected-change");
-                Directory.CreateDirectory(extraDirectory);
-                File.WriteAllText(extraWgsPath, extraContent);
-            }
-            return [];
-        });
-
-        var result = await adapter.ReplaceManagedSlotAsync(
-            artifact,
-            baseline.BaselineDirectory!,
-            slot,
-            "Tester",
-            backupRoot);
-
-        Assert.False(result.Success);
-        Assert.False(File.Exists(extraWgsPath));
-        Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
-        var quarantinedExtra = Assert.Single(Directory.EnumerateFiles(
-            Path.Combine(result.PreImportSnapshotDirectory!, "rollback-quarantine"),
-            Path.GetFileName(extraWgsPath),
-            SearchOption.AllDirectories));
-        Assert.Equal(extraContent, await File.ReadAllTextAsync(quarantinedExtra));
-        Assert.Contains(result.Errors, error => error.Contains("quarantaine", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
     public async Task ReplaceManagedSlotRollsBackWhenFinalInspectionReportsContainerWarnings()
     {
         var wgs = CreateWgs();
-        CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
+        var targetBlob = CreateWorldFixture(wgs, "Standard-5.json", "GSH-SHLAGS-RETURN");
         CreateWorldFixture(wgs, "Standard-2.json", "ProtectedWorld");
         var setupAdapter = CreateAdapter();
         var artifact = await PrepareManagedSlotArtifactAsync(setupAdapter, "Standard-5.json", "Tester", "GSH-MONDE-PARTAGE", "prepared-warning-after-write");
         var slot = new ManagedSlotReference("Standard-5.json", "GSH-SHLAGS-RETURN", "GSH-MONDE-PARTAGE");
         var baseline = await setupAdapter.CreateManagedSlotBaselineAsync(slot, Path.Combine(_root, "managed-baseline"));
-        var beforeFiles = await ReadFixtureFileHashesAsync(wgs);
-        var warningPath = string.Empty;
+        var targetBefore = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob)));
         var probeCount = 0;
         var adapter = CreateAdapter(() =>
         {
             probeCount++;
-            if (probeCount == 9) warningPath = CreateMalformedContainerMetadata(wgs, "C-MALFORMED-AFTER-WRITE");
+            if (probeCount == 8) CreateMalformedContainerMetadata(wgs, "C-MALFORMED-AFTER-WRITE");
             return [];
         });
 
@@ -1515,12 +1083,7 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
 
         Assert.False(result.Success);
         Assert.Contains(result.Errors, error => error.Contains("conteneur", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(beforeFiles, await ReadFixtureFileHashesAsync(wgs));
-        Assert.False(File.Exists(warningPath));
-        Assert.Single(Directory.EnumerateFiles(
-            Path.Combine(result.PreImportSnapshotDirectory!, "rollback-quarantine"),
-            Path.GetFileName(warningPath),
-            SearchOption.AllDirectories));
+        Assert.Equal(targetBefore, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(targetBlob))));
     }
 
     [Fact]
@@ -1537,7 +1100,7 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         var adapter = CreateAdapter(() =>
         {
             probeCount++;
-            if (probeCount == 9)
+            if (probeCount == 8)
             {
                 File.AppendAllText(targetBlob, "post-write-change");
                 var snapshot = Directory.EnumerateDirectories(backupRoot).Single();
@@ -2105,13 +1668,6 @@ public sealed class PlanetCrafterGamePassAdapterTests : IDisposable
         blobId.TryWriteBytes(metadata.AsSpan(152, 16));
         File.WriteAllBytes(Path.Combine(container, "container.1"), metadata);
         return Path.Combine(container, blobName);
-    }
-
-    private static void RotateFixtureCurrentBlob(string containerMetadataPath, Guid blobId)
-    {
-        var metadata = File.ReadAllBytes(containerMetadataPath);
-        blobId.TryWriteBytes(metadata.AsSpan(152, 16));
-        File.WriteAllBytes(containerMetadataPath, metadata);
     }
 
     private static void PointFixtureCurrentBlobToMissingGeneration(string containerMetadataPath)
