@@ -4,7 +4,7 @@
 
 **Branche de validation :** `codex/v1-lot2-contextual-app`
 
-**État global :** Lot 1 fusionné sur `main`. Lot 2 (slot local permanent) entièrement implémenté et testé automatiquement (322 tests, 0 échec) ; le paquet `0.4.0-pilot` est construit et son SHA-256 connu. Rien de tout cela n'a encore été validé sur un vrai PC/WGS : c'est l'objet des tâches 12 à 14, toutes des portes externes nécessitant l'accord explicite de l'utilisateur et, pour la dernière, la disponibilité de Bob.
+**État global :** Lot 1 fusionné sur `main`. Lot 2 (slot local permanent) entièrement implémenté et testé automatiquement (322 tests, 0 échec) ; le paquet `0.4.0-pilot` est construit et son SHA-256 connu. Validé réellement sur le PC de Steven (Tâche 12) et, ce soir, en partie avec Bob (Tâche 14) : installation, configuration initiale et un vrai incident de reprise tous réussis. Reste : Steven prend la main pour clôturer le cycle `Steven → Bob → Steven`, le parcours symétrique (Steven héberge, Bob rejoint), et le redémarrage Windows / coupure de service en session `InGame`.
 
 Cette checklist ne marque comme validé que ce qui a été observé ou vérifié réellement. Le plan d'exécution du slot permanent est `docs/superpowers/plans/2026-08-09-permanent-local-slot-implementation.md`.
 
@@ -67,9 +67,11 @@ Toutes les lignes ci-dessous sont codées, testées unitairement (mondes/adaptat
 - [ ] Vérifier un redémarrage Windows pendant une session `InGame`, puis la reprise de capture après stabilité. (regroupé avec la coupure de service ci-dessous, à faire ensemble.)
 - [ ] Vérifier une coupure contrôlée pendant l'import et la réconciliation sans nouvelle écriture ambiguë. (regroupé avec le redémarrage Windows — la réutilisation étant désormais quasi instantanée, ce test cible plutôt la coupure du service pendant une session `InGame` en cours.)
 - [x] État contextuel « jeu lancé hors Hub ». (2026-08-10 — jeu lancé directement depuis Xbox sans passer par GameSave Hub ; accueil affiche bien « Le jeu est lancé hors de GameSave Hub », aucune action ; confirmé côté service : `gameRunning=true`, aucune session locale ni distante.)
-- [ ] États contextuels restants : serveur indisponible puis rétabli, hôte distant en préparation et en jeu, reprise manuelle après incident, mise à jour requise.
+- [x] État contextuel « hôte distant en préparation et en jeu ». (2026-08-10 — vrai pilote avec Bob : écran de Steven affichait correctement « BoB XiMe prépare le monde » pendant que Bob configurait/hébergeait, rejoint sans problème ensuite.)
+- [x] État contextuel « reprise manuelle après incident ». (2026-08-10 — incident réel non planifié pendant le pilote avec Bob, voir section dédiée ci-dessus.)
+- [ ] États contextuels restants : serveur indisponible puis rétabli, mise à jour requise.
 - [ ] Vérifier l'interface à 1440×1024 et aux échelles Windows 100 %, 125 %, 150 % et 200 %. (reporté à la demande de l'utilisateur.)
-- [ ] Vérifier clavier seul, focus visible, noms lecteur d'écran, retour `Copié`, absence de débordement et absence d'identifiants techniques sur l'accueil.
+- [ ] Vérifier clavier seul, focus visible, noms lecteur d'écran, retour `Copié`, absence de débordement et absence d'identifiants techniques sur l'accueil. (jugé non utile par l'utilisateur pour l'instant.)
 
 ## Reste à faire avant la validation réelle
 
@@ -106,14 +108,19 @@ Paquet `0.4.0-pilot` reconstruit et réinstallé après chaque correctif ; les d
 
 ## Portes externes
 
-- [ ] Bob est disponible pour recevoir et tester le mini-exporteur.
-- [ ] Installer sur Bob exactement le même ZIP `0.4.0-pilot` et vérifier son SHA-256.
-- [ ] Réaliser sa configuration unique avec un seul `GSH-MONDE-PARTAGE`.
-- [ ] Réaliser le cycle réel `Steven → Bob → Steven` avec progression vérifiée à chaque publication.
-- [ ] Vérifier le parcours de connexion pendant que Bob héberge, puis le parcours symétrique.
+- [x] Bob est disponible. (2026-08-10, soir.)
+- [x] Installer sur Bob exactement le même ZIP `0.4.0-pilot` (`sha256:b992caa5e...874572`). (2026-08-10 — installation et enrôlement réussis sans problème signalé.)
+- [x] Réaliser sa configuration unique avec un seul `GSH-MONDE-PARTAGE`. (2026-08-10 — réussie sans problème signalé.)
+- [ ] Réaliser le cycle réel `Steven → Bob → Steven` avec progression vérifiée à chaque publication. **Bob → Steven fait ; Steven → Bob restant.** Bob a pris la main en premier (configuration initiale = première prise en main), Steven a rejoint sa partie sans problème. Bob a sauvegardé et fermé le jeu, puis a subi une **vraie interruption non planifiée** pendant la capture/publication (session locale passée en `Interrupted`, aucune écriture supplémentaire). Il a cliqué **« Reprendre en sécurité »** : reprise réussie, monde de nouveau `Available`, activité `BoB XiMe` publiée et confirmée côté serveur (`worldStatus.status=Available`, `activeSession` vide). Reste à faire : Steven prend la main, vérifie que la progression de Bob est bien présente, joue, publie à son tour.
+- [x] Vérifier le parcours de connexion pendant que Bob héberge. (2026-08-10 — écran de Steven affichait correctement « BoB XiMe prépare le monde » puis l'état d'hébergement distant ; rejoint sans problème.)
+- [ ] Vérifier le parcours symétrique (Steven héberge, Bob rejoint) — pas encore testé ce soir.
 - [ ] Obtenir un accord explicite avant tout nouveau déploiement NAS/API, migration de production, écriture WGS de validation ou élévation de version minimale.
 - [ ] Exécuter la revue finale, les tests complets et les sauvegardes finales.
 - [ ] Obtenir la validation conjointe avant fusion vers `main` ; aucun push ou merge avant cet accord.
+
+## Reprise après incident — validée en conditions réelles (2026-08-10)
+
+Non planifiée : pendant le tout premier pilote réel avec Bob, sa session locale a été interrompue après sauvegarde/fermeture du jeu, pendant la sécurisation (capture ou publication) — la cause exacte n'a pas été creusée puisque la reprise a réglé la situation, mais elle est consignée dans son diagnostic local si besoin d'y revenir. Chez Bob : état `Interrupted`, action unique proposée « Reprendre en sécurité », aucune reprise automatique tentée. Chez Steven : le monde restait affiché « en préparation », cohérent avec une session distante non terminée, pas une anomalie séparée. Après le clic de Bob : reprise réussie sans nouvelle écriture ambiguë, publication aboutie, monde `Available`. Ceci couvre la ligne « reprise manuelle après incident » des états contextuels ci-dessus, désormais validée.
 
 ## Critère de clôture
 
