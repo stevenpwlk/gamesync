@@ -638,6 +638,22 @@ protectedApi.MapPost("/sessions/{id:guid}/report-failure", async (Guid id, Repor
     return Results.NoContent();
 });
 
+protectedApi.MapPost("/device/revoke-self", async (
+    GameSaveHubDbContext db,
+    TimeProvider clock,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
+{
+    if (!TryDeviceId(context.User, out var deviceId)) return Error(context, 401, "token_invalid", "Jeton d'appareil invalide.");
+    var device = await db.Devices.FindAsync([deviceId], cancellationToken);
+    if (device is null || device.RevokedAtUtc is not null) return Results.NoContent();
+    if (await db.Sessions.AnyAsync(x => x.DeviceId == deviceId && x.ReleasedAtUtc == null, cancellationToken))
+        return Error(context, 409, "device_has_active_session", "Cet appareil détient une session active : elle doit se terminer avant la révocation.");
+    device.RevokedAtUtc = clock.GetUtcNow();
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.NoContent();
+});
+
 await VerifyDatabaseAsync(app.Services);
 await app.RunAsync();
 
