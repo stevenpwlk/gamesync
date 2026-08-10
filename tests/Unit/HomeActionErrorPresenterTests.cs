@@ -18,6 +18,11 @@ public sealed class HomeActionErrorPresenterTests
     [InlineData("active_transfer_exists")]
     [InlineData("client_update_required")]
     [InlineData("player_not_found")]
+    [InlineData("game_running")]
+    [InlineData("wgs_not_stable")]
+    [InlineData("managed_slot_already_bound")]
+    [InlineData("managed_slot_candidate_changed")]
+    [InlineData("managed_slot_requires_attention")]
     public void KnownFailuresUseCuratedUserFacingWording(string code)
     {
         var message = HomeActionErrorPresenter.Present(code);

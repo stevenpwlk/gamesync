@@ -75,6 +75,120 @@ public sealed class HomeStatePresenterTests
     }
 
     [Fact]
+    public void MissingSlotAndFreeWorldOffersOneTimeConfiguration()
+    {
+        var view = HomeStatePresenter.Present(Context(slot: ManagedSlotStatus.Missing));
+
+        Assert.Equal("Configurons ce PC", view.Title);
+        Assert.Equal(HomePrimaryAction.ConfigureManagedSlot, view.PrimaryAction);
+        Assert.Equal("Configurer ce PC", view.PrimaryActionLabel);
+    }
+
+    [Fact]
+    public void ReadySlotAndFreeWorldKeepsDailyTakeControlAction()
+    {
+        var view = HomeStatePresenter.Present(Context(slot: ManagedSlotStatus.Ready));
+
+        Assert.Equal("Le monde est prêt", view.Title);
+        Assert.Equal(HomePrimaryAction.StartTransfer, view.PrimaryAction);
+        Assert.Equal("Prendre la main", view.PrimaryActionLabel);
+    }
+
+    [Fact]
+    public void LegacyCandidateOffersExplicitRebind()
+    {
+        var view = HomeStatePresenter.Present(Context(slot: ManagedSlotStatus.LegacyCandidate));
+
+        Assert.Equal(HomeVisualState.ManagedSlotRebind, view.State);
+        Assert.Equal(HomePrimaryAction.BindExistingManagedSlot, view.PrimaryAction);
+    }
+
+    [Theory]
+    [InlineData(ManagedSlotStatus.RenamePending)]
+    [InlineData(ManagedSlotStatus.UnboundCandidate)]
+    [InlineData(ManagedSlotStatus.BoundSlotMissing)]
+    [InlineData(ManagedSlotStatus.BindingMismatch)]
+    [InlineData(ManagedSlotStatus.InvalidTopology)]
+    [InlineData(ManagedSlotStatus.Ambiguous)]
+    public void InconsistentSlotStatusEntersRepairStop(ManagedSlotStatus status)
+    {
+        var view = HomeStatePresenter.Present(Context(slot: status));
+
+        Assert.Equal("Le slot du monde doit être vérifié", view.Title);
+        Assert.Equal(HomePrimaryAction.OpenDiagnostics, view.PrimaryAction);
+    }
+
+    [Fact]
+    public void RemoteHostTakesPriorityOverLocalSlotSetup()
+    {
+        var view = HomeStatePresenter.Present(Context(
+            slot: ManagedSlotStatus.Missing,
+            remoteState: "InGame",
+            remotePlayer: "Bob"));
+
+        Assert.Equal(HomeVisualState.RemoteHosting, view.State);
+        Assert.Equal(HomePrimaryAction.LaunchGame, view.PrimaryAction);
+        Assert.Equal("Lancer The Planet Crafter", view.PrimaryActionLabel);
+    }
+
+    [Fact]
+    public void GameOutsideHubTakesPriorityOverLocalSlotSetup()
+    {
+        var view = HomeStatePresenter.Present(Context(slot: ManagedSlotStatus.Missing, gameRunning: true));
+
+        Assert.Equal(HomeVisualState.OffHub, view.State);
+        Assert.Equal(HomePrimaryAction.None, view.PrimaryAction);
+    }
+
+    [Fact]
+    public void InitialSlotSetupStepOneOffersExactCopyText()
+    {
+        var context = Context(localStage: TransferStage.AwaitingPlaceholder, flowKind: TransferFlowKind.InitialSlotSetup);
+
+        var view = HomeStatePresenter.Present(context);
+
+        Assert.Equal("Configuration unique — étape 1 sur 2", view.Title);
+        Assert.True(view.ShowCopySlotName);
+        Assert.Equal("GSH-MONDE-PARTAGE", view.SlotName);
+        Assert.Equal(HomePrimaryAction.LaunchGame, view.PrimaryAction);
+    }
+
+    [Fact]
+    public void InitialSlotSetupInstallingShowsNoAction()
+    {
+        var context = Context(localStage: TransferStage.Importing, flowKind: TransferFlowKind.InitialSlotSetup);
+
+        var view = HomeStatePresenter.Present(context);
+
+        Assert.Equal("Installation du monde partagé…", view.Title);
+        Assert.Equal(HomePrimaryAction.None, view.PrimaryAction);
+        Assert.False(view.ShowCopySlotName);
+    }
+
+    [Fact]
+    public void InitialSlotSetupStepTwoOffersLaunch()
+    {
+        var context = Context(localStage: TransferStage.ReadyToPlay, flowKind: TransferFlowKind.InitialSlotSetup);
+
+        var view = HomeStatePresenter.Present(context);
+
+        Assert.Equal("Configuration unique — étape 2 sur 2", view.Title);
+        Assert.Equal(HomePrimaryAction.LaunchGame, view.PrimaryAction);
+        Assert.False(view.ShowCopySlotName);
+    }
+
+    [Fact]
+    public void DailyReuseAwaitingImportKeepsUnchangedWording()
+    {
+        var context = Context(localStage: TransferStage.ReadyToPlay, flowKind: TransferFlowKind.ManagedSlotReuse);
+
+        var view = HomeStatePresenter.Present(context);
+
+        Assert.Equal("Tout est prêt pour jouer", view.Title);
+        Assert.False(view.ShowCopySlotName);
+    }
+
+    [Fact]
     public void SelectsOnlyUniqueWorldWithArtifact()
     {
         var selected = PrimaryWorldSelector.Select(
@@ -111,13 +225,15 @@ public sealed class HomeStatePresenterTests
         bool wgsStable = true,
         bool wgsAvailable = true,
         TransferStage? localStage = null,
+        TransferFlowKind flowKind = TransferFlowKind.LegacyPlaceholder,
         string? remoteState = null,
-        string? remotePlayer = null)
+        string? remotePlayer = null,
+        ManagedSlotStatus slot = ManagedSlotStatus.Ready)
     {
         var deviceId = Guid.NewGuid();
         var worldId = Guid.NewGuid();
         var local = localStage is TransferStage stage
-            ? TransferSession.Create(worldId, "Steven", DateTimeOffset.UtcNow) with { Stage = stage }
+            ? TransferSession.Create(worldId, "Steven", DateTimeOffset.UtcNow, flowKind) with { Stage = stage }
             : null;
         var remote = remoteState is null
             ? null
@@ -148,6 +264,7 @@ public sealed class HomeStatePresenterTests
             null,
             gameRunning,
             wgsStable,
-            wgsAvailable);
+            wgsAvailable,
+            slot);
     }
 }

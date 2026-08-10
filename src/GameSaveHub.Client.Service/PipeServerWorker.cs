@@ -217,11 +217,16 @@ public sealed partial class PipeServerWorker(
         var installation = await adapter.DetectInstallationAsync(cancellationToken);
         var wgsAvailable = installation.WgsRoot is not null;
         var wgsStable = false;
+        var managedSlotStatus = ManagedSlotStatus.Ready;
         if (wgsAvailable && state.DeviceId is not null && active.Length == 0 && !process.IsRunning)
         {
             try
             {
                 wgsStable = (await adapter.InspectLocalStorageAsync(cancellationToken)).Stable;
+                if (wgsStable && !string.IsNullOrWhiteSpace(state.RegisteredPlayerName))
+                {
+                    managedSlotStatus = (await slotCoordinator.GetStatusAsync(state.RegisteredPlayerName, cancellationToken)).Status;
+                }
             }
             catch (InvalidOperationException)
             {
@@ -240,7 +245,8 @@ public sealed partial class PipeServerWorker(
             lastFinished,
             process.IsRunning,
             wgsStable,
-            wgsAvailable);
+            wgsAvailable,
+            managedSlotStatus);
 
         return new PipeResponse(true, "ok", "Contexte d'accueil.", context);
     }

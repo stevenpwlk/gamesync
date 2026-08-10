@@ -41,15 +41,69 @@ public static class HomeStatePresenter
         if (!context.WgsStable)
             return View(HomeVisualState.SafetyStop, "La sauvegarde Xbox se synchronise", "Patientez quelques instants : la prise en main sera proposée dès que les fichiers seront stables.", 1, indeterminate: true);
 
-        return View(HomeVisualState.Ready, "Le monde est prêt", "Vous pouvez préparer la dernière version pour héberger la partie.", 1, HomePrimaryAction.StartTransfer, "Prendre la main");
+        return PresentSlotStatus(context.ManagedSlotStatus);
     }
+
+    private static HomeViewState PresentSlotStatus(ManagedSlotStatus status) => status switch
+    {
+        ManagedSlotStatus.Ready => View(
+            HomeVisualState.Ready,
+            "Le monde est prêt",
+            "Vous pouvez préparer la dernière version pour héberger la partie.",
+            1,
+            HomePrimaryAction.StartTransfer,
+            "Prendre la main"),
+        ManagedSlotStatus.Missing => View(
+            HomeVisualState.ManagedSlotSetup,
+            "Configurons ce PC",
+            "Une configuration unique en deux étapes est nécessaire avant la première prise en main sur ce PC.",
+            1,
+            HomePrimaryAction.ConfigureManagedSlot,
+            "Configurer ce PC"),
+        ManagedSlotStatus.LegacyCandidate => View(
+            HomeVisualState.ManagedSlotRebind,
+            "Un monde partagé existant a été trouvé",
+            "Rattachez-le pour continuer à l'utiliser comme emplacement permanent de ce PC.",
+            1,
+            HomePrimaryAction.BindExistingManagedSlot,
+            "Rattacher ce monde"),
+        _ => View(
+            HomeVisualState.SafetyStop,
+            "Le slot du monde doit être vérifié",
+            "Aucune action automatique ne sera tentée avant une vérification.",
+            1,
+            HomePrimaryAction.OpenDiagnostics,
+            "Ouvrir l'assistance")
+    };
 
     private static HomeViewState PresentLocal(TransferSession session, bool gameRunning) => session.Stage switch
     {
+        TransferStage.AwaitingPlaceholder when session.FlowKind == TransferFlowKind.InitialSlotSetup => View(
+            HomeVisualState.ManagedSlotConfigureStep1,
+            "Configuration unique — étape 1 sur 2",
+            "Copiez ce nom, lancez le jeu, créez un monde portant exactement ce nom, entrez-y une fois, sauvegardez puis fermez complètement.",
+            2,
+            HomePrimaryAction.LaunchGame,
+            "Lancer The Planet Crafter",
+            slotName: ManagedSlotResolver.PermanentDisplayName,
+            showCopySlotName: true),
         TransferStage.AwaitingPlaceholder => View(
             HomeVisualState.Placeholder,
             "Créons l'emplacement du monde",
             $"Lancez le jeu et créez le monde « {session.PlaceholderName ?? "indiqué"} ».",
+            2,
+            HomePrimaryAction.LaunchGame,
+            "Lancer The Planet Crafter"),
+        TransferStage.Importing when session.FlowKind == TransferFlowKind.InitialSlotSetup => View(
+            HomeVisualState.ManagedSlotInstalling,
+            "Installation du monde partagé…",
+            "GameSave Hub installe la sauvegarde dans l'emplacement que vous venez de créer.",
+            2,
+            indeterminate: true),
+        TransferStage.ReadyToPlay when session.FlowKind == TransferFlowKind.InitialSlotSetup => View(
+            HomeVisualState.ManagedSlotConfigureStep2,
+            "Configuration unique — étape 2 sur 2",
+            "Votre PC est configuré. Lancez le jeu pour rejoindre le monde partagé.",
             2,
             HomePrimaryAction.LaunchGame,
             "Lancer The Planet Crafter"),
@@ -91,6 +145,12 @@ public static class HomeStatePresenter
             2,
             HomePrimaryAction.OpenDiagnostics,
             "Ouvrir l'assistance"),
+        _ when session.FlowKind == TransferFlowKind.InitialSlotSetup => View(
+            HomeVisualState.ManagedSlotInstalling,
+            "Installation du monde partagé…",
+            "GameSave Hub prépare la configuration unique de ce PC.",
+            2,
+            indeterminate: true),
         _ => View(
             HomeVisualState.Preparing,
             "Préparation de votre partie…",
@@ -116,6 +176,8 @@ public static class HomeStatePresenter
         int progressStep,
         HomePrimaryAction action = HomePrimaryAction.None,
         string? actionLabel = null,
-        bool indeterminate = false) =>
-        new(state, title, instruction, action, actionLabel, progressStep, indeterminate);
+        bool indeterminate = false,
+        string? slotName = null,
+        bool showCopySlotName = false) =>
+        new(state, title, instruction, action, actionLabel, progressStep, indeterminate, slotName, showCopySlotName);
 }

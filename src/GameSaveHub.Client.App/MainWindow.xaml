@@ -110,6 +110,20 @@
                   <TextBlock x:Name="StateInstruction" Text="GameSave Hub vérifie la dernière sauvegarde."
                              Style="{StaticResource Muted}" FontSize="17" TextAlignment="Center"
                              HorizontalAlignment="Center" Margin="0,8,0,0" />
+                  <Border x:Name="SlotNamePanel" Visibility="Collapsed" Margin="0,18,0,0" Padding="16,12"
+                          Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}"
+                          BorderThickness="1" CornerRadius="10" HorizontalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                      <TextBox x:Name="SlotNameText" IsReadOnly="True" Width="220" VerticalAlignment="Center"
+                               AutomationProperties.Name="Nom du monde partagé à créer" />
+                      <Button x:Name="CopySlotNameButton" Content="Copier le nom" Margin="10,0,0,0"
+                              AutomationProperties.Name="Copier le nom du monde partagé"
+                              Click="CopySlotName_Click" />
+                      <TextBlock x:Name="CopyConfirmationText" Text="Copié" Visibility="Collapsed"
+                                 Foreground="{StaticResource Success}" VerticalAlignment="Center"
+                                 Margin="10,0,0,0" AutomationProperties.LiveSetting="Polite" />
+                    </StackPanel>
+                  </Border>
                   <Button x:Name="PrimaryButton" Content="Prendre la main" Style="{StaticResource PrimaryButton}"
                           Width="260" Foreground="White" HorizontalAlignment="Center"
                           Margin="0,22,0,0" Click="Primary_Click">

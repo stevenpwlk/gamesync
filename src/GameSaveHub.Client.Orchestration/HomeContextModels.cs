@@ -14,7 +14,8 @@ public sealed record HomeContextSnapshot(
     TransferSession? LastFinishedSession,
     bool GameRunning,
     bool WgsStable,
-    bool WgsAvailable = true);
+    bool WgsAvailable = true,
+    ManagedSlotStatus ManagedSlotStatus = ManagedSlotStatus.Ready);
 
 public enum HomeVisualState
 {
@@ -31,7 +32,12 @@ public enum HomeVisualState
     Securing,
     OffHub,
     Interrupted,
-    ManualReview
+    ManualReview,
+    ManagedSlotSetup,
+    ManagedSlotConfigureStep1,
+    ManagedSlotInstalling,
+    ManagedSlotConfigureStep2,
+    ManagedSlotRebind
 }
 
 public enum HomePrimaryAction
@@ -40,7 +46,9 @@ public enum HomePrimaryAction
     StartTransfer,
     LaunchGame,
     ResumeTransfer,
-    OpenDiagnostics
+    OpenDiagnostics,
+    ConfigureManagedSlot,
+    BindExistingManagedSlot
 }
 
 public sealed record HomeViewState(
@@ -50,7 +58,9 @@ public sealed record HomeViewState(
     HomePrimaryAction PrimaryAction,
     string? PrimaryActionLabel,
     int ProgressStep,
-    bool IsProgressIndeterminate);
+    bool IsProgressIndeterminate,
+    string? SlotName = null,
+    bool ShowCopySlotName = false);
 
 public sealed record PrimaryWorldSelection(
     bool Success,

@@ -20,6 +20,7 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private readonly PipeClient _pipeClient = new();
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(5) };
+    private readonly DispatcherTimer _copyConfirmationTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly CancellationTokenSource _lifetime = new();
     private readonly PlanetCrafterGamePassAdapter _interactiveAdapter = new();
     private HomeContextSnapshot? _context;
@@ -36,6 +37,11 @@ public sealed partial class MainWindow : Window, IDisposable
         InitializeComponent();
         DeviceNameText.Text = Environment.MachineName;
         _refreshTimer.Tick += RefreshTimer_Tick;
+        _copyConfirmationTimer.Tick += (_, _) =>
+        {
+            _copyConfirmationTimer.Stop();
+            CopyConfirmationText.Visibility = Visibility.Collapsed;
+        };
         Loaded += LoadedAsync;
         Closed += (_, _) => Dispose();
     }
@@ -147,6 +153,8 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             StateInstruction.Text = _actionError;
         }
+        SlotNamePanel.Visibility = view.ShowCopySlotName ? Visibility.Visible : Visibility.Collapsed;
+        if (view.ShowCopySlotName) SlotNameText.Text = view.SlotName ?? string.Empty;
         PrimaryButton.Visibility = view.PrimaryAction == HomePrimaryAction.None ? Visibility.Collapsed : Visibility.Visible;
         PrimaryButton.Content = _openXboxFallback && view.PrimaryAction == HomePrimaryAction.LaunchGame
             ? "Ouvrir l'application Xbox"
@@ -180,6 +188,7 @@ public sealed partial class MainWindow : Window, IDisposable
         HealthText.Text = "Service indisponible";
         StateTitle.Text = "Le monde est momentanément inaccessible";
         StateInstruction.Text = "La connexion sera réessayée automatiquement.";
+        SlotNamePanel.Visibility = Visibility.Collapsed;
         PrimaryButton.Visibility = Visibility.Collapsed;
         BusyBar.Visibility = Visibility.Visible;
         SafetyText.Visibility = Visibility.Collapsed;
@@ -226,6 +235,17 @@ public sealed partial class MainWindow : Window, IDisposable
                     await SaveDiagnosticAsync();
                     refreshAfterAction = false;
                     break;
+                case HomePrimaryAction.ConfigureManagedSlot when _context.PrimaryWorld is { } configureWorld:
+                    var configured = await _pipeClient.SendAsync(new PipeRequest(
+                        "transfer-start",
+                        WorldId: configureWorld.WorldId,
+                        PlayerName: _context.PlayerName), _lifetime.Token);
+                    refreshAfterAction = HandleActionResult(configured);
+                    break;
+                case HomePrimaryAction.BindExistingManagedSlot:
+                    var bound = await _pipeClient.SendAsync(new PipeRequest("managed-slot-bind-existing"), _lifetime.Token);
+                    refreshAfterAction = HandleActionResult(bound);
+                    break;
             }
         }
         catch (Exception exception) when (exception is IOException or TimeoutException or InvalidOperationException or System.ComponentModel.Win32Exception)
@@ -241,6 +261,15 @@ public sealed partial class MainWindow : Window, IDisposable
             PrimaryButton.IsEnabled = true;
             if (refreshAfterAction) await RefreshAsync();
         }
+    }
+
+    private void CopySlotName_Click(object sender, RoutedEventArgs e)
+    {
+        if (_view?.SlotName is not { } slotName) return;
+        Clipboard.SetText(slotName);
+        _copyConfirmationTimer.Stop();
+        CopyConfirmationText.Visibility = Visibility.Visible;
+        _copyConfirmationTimer.Start();
     }
 
     private bool HandleActionResult(PipeResponse response)
@@ -369,6 +398,7 @@ public sealed partial class MainWindow : Window, IDisposable
     public void Dispose()
     {
         _refreshTimer.Stop();
+        _copyConfirmationTimer.Stop();
         _lifetime.Cancel();
         _lifetime.Dispose();
     }
