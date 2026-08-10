@@ -64,7 +64,7 @@ function Test-Phase3Guards {
     }
     $cases = $facts + $inline
     # Plancher de non-regression : le nombre de cas peut augmenter, jamais diminuer.
-    $minimumCases = 120
+    $minimumCases = 250
     if ($cases -lt $minimumCases) {
         throw "Regression de couverture : $cases cas pour un plancher de $minimumCases."
     }
@@ -232,7 +232,51 @@ function Test-Phase3Guards {
     Write-Host 'Assistant de transfert complet, gestion d erreur, encodage des scripts et culture numerique : valides'
 }
 
-Write-Host "`n=== GameSave Hub - Integrated Client Phase 3 / 0.3.0 r2 ===" -ForegroundColor Cyan
+function Test-Lot2Guards {
+    Write-Host "`n=== Garde-fous statiques Lot 2 (slot permanent) ===" -ForegroundColor Cyan
+
+    $serviceOptions = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.Service\ClientServiceOptions.cs') -Raw
+    if ($serviceOptions -notmatch 'ManagedSlotStatePath') {
+        throw 'Chemin persistant du slot gere absent de ClientServiceOptions.'
+    }
+
+    $httpClient = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.Service\AuthenticatedTransferServerClient.cs') -Raw
+    if ($httpClient -notmatch 'X-GameSaveHub-Client-Version') {
+        throw 'En-tete de version client absent du client HTTP authentifie.'
+    }
+
+    $serverProgram = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Server.Api\Program.cs') -Raw
+    if ($serverProgram -notmatch 'ClientCompatibilityPolicy\.CanAcquire' -or $serverProgram -notmatch 'client_update_required') {
+        throw 'Verrou de version minimale absent de l acquisition serveur.'
+    }
+
+    $pipe = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.Service\PipeServerWorker.cs') -Raw
+    if ($pipe -notmatch '"maintenance-status"' -or $pipe -notmatch '"managed-slot-bind-existing"') {
+        throw 'Commandes pipe du slot gere absentes du service (maintenance-status / managed-slot-bind-existing).'
+    }
+
+    $resolver = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.Orchestration\ManagedSlotResolver.cs') -Raw
+    if ($resolver -notmatch 'GSH-MONDE-PARTAGE') {
+        throw 'Nom visible fixe du slot permanent absent du resolveur.'
+    }
+
+    $coordinator = Get-Content -LiteralPath (Join-Path $repo 'src\GameSaveHub.Client.Orchestration\ManagedSlotCoordinator.cs') -Raw
+    if ($coordinator -notmatch 'BindExistingAsync' -or $coordinator -notmatch 'GetMaintenanceStatusAsync') {
+        throw 'Coordinateur du slot gere incomplet.'
+    }
+
+    # Le Lot 3 (mise a jour a distance) est hors perimetre : ce paquet ne doit contenir
+    # aucun binaire d updater, ce qui garantit qu aucune activation prematuree n est possible.
+    $updaterFiles = Get-ChildItem -LiteralPath (Join-Path $repo 'src') -Recurse -File |
+        Where-Object { $_.Name -match 'Updater' }
+    if ($updaterFiles) {
+        throw "Binaire ou source d updater detecte, hors perimetre du Lot 2 : $($updaterFiles[0].FullName)"
+    }
+
+    Write-Host 'Chemin persistant, en-tete de version, commandes pipe, nom fixe et absence d updater : valides'
+}
+
+Write-Host "`n=== GameSave Hub - Client Lot 2 / 0.4.0 pilote ===" -ForegroundColor Cyan
 $version = (& dotnet --version).Trim()
 if (-not $version.StartsWith('10.')) {
     throw "SDK .NET 10 requis. Version detectee : $version"
@@ -241,6 +285,7 @@ Write-Host "SDK detecte : $version"
 
 Test-SourceManifest
 Test-Phase3Guards
+Test-Lot2Guards
 
 Invoke-DotnetStep '1/6 Restauration' @('restore', '.\GameSaveHub.slnx')
 Invoke-DotnetStep '2/6 Compilation complete' @('build', '.\GameSaveHub.slnx', '--configuration', 'Release', '--no-restore')
@@ -249,7 +294,7 @@ Invoke-DotnetStep '4/6 Capacites adapter' @('run', '--project', '.\src\GameSaveH
 
 Write-Host "`n=== 5/6 Publication client Windows ===" -ForegroundColor Cyan
 $artifactRoot = Join-Path $repo 'artifacts'
-$clientPackage = Join-Path $artifactRoot 'GameSaveHub-Client-Phase3-0.3.0'
+$clientPackage = Join-Path $artifactRoot 'GameSaveHub-Client-Lot2-0.4.0'
 $serviceOut = Join-Path $clientPackage 'Service'
 $appOut = Join-Path $clientPackage 'App'
 if (Test-Path -LiteralPath $clientPackage) { Remove-Item -LiteralPath $clientPackage -Recurse -Force }
@@ -266,9 +311,9 @@ Copy-Item -LiteralPath '.\tools\LISEZ-MOI-DABORD.txt' -Destination $clientPackag
 Copy-Item -LiteralPath '.\tools\INSTALL-GAMESAVEHUB-CLIENT.ps1' -Destination $clientPackage -Force
 Copy-Item -LiteralPath '.\tools\UNINSTALL-GAMESAVEHUB-CLIENT.ps1' -Destination $clientPackage -Force
 Copy-Item -LiteralPath '.\tools\STATUS-GAMESAVEHUB-CLIENT.ps1' -Destination $clientPackage -Force
-Copy-Item -LiteralPath '.\docs\operations\PHASE3-INTEGRATED-CLIENT.md' -Destination (Join-Path $clientPackage 'README-PHASE3.md') -Force
+Copy-Item -LiteralPath '.\docs\operations\LOT2-CONTEXTUAL-CLIENT.md' -Destination (Join-Path $clientPackage 'README-LOT2.md') -Force
 
-$clientZip = Join-Path $artifactRoot 'GameSaveHub-Client-Phase3-0.3.0-win-x64.zip'
+$clientZip = Join-Path $artifactRoot 'GameSaveHub-Client-Lot2-0.4.0-win-x64.zip'
 if (Test-Path -LiteralPath $clientZip) { Remove-Item -LiteralPath $clientZip -Force }
 Compress-Archive -Path (Join-Path $clientPackage '*') -DestinationPath $clientZip -CompressionLevel Optimal
 $clientHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $clientZip).Hash.ToLowerInvariant()
@@ -279,7 +324,7 @@ Write-Host "SHA-256    : $clientHash"
 if ($PilotTransfer) {
     Write-Host "`n=== Variante PILOTE (verrou d ecriture ouvert) ===" -ForegroundColor Yellow
 
-    $pilotPackage = Join-Path $artifactRoot 'GameSaveHub-Client-Phase3-0.3.0-PILOTE'
+    $pilotPackage = Join-Path $artifactRoot 'GameSaveHub-Client-Lot2-0.4.0-PILOTE'
     if (Test-Path -LiteralPath $pilotPackage) { Remove-Item -LiteralPath $pilotPackage -Recurse -Force }
     Copy-Item -LiteralPath $clientPackage -Destination $pilotPackage -Recurse -Force
 
@@ -289,7 +334,7 @@ if ($PilotTransfer) {
     Copy-Item -LiteralPath '.\tools\INSTALLER-GAMESAVEHUB-PILOTE.cmd' -Destination $pilotPackage -Force
     Copy-Item -LiteralPath '.\tools\LISEZ-MOI-PILOTE.txt' -Destination (Join-Path $pilotPackage 'LISEZ-MOI-DABORD.txt') -Force
 
-    $pilotZip = Join-Path $artifactRoot 'GameSaveHub-Client-Phase3-0.3.0-PILOTE-win-x64.zip'
+    $pilotZip = Join-Path $artifactRoot 'GameSaveHub-Client-Lot2-0.4.0-PILOTE-win-x64.zip'
     if (Test-Path -LiteralPath $pilotZip) { Remove-Item -LiteralPath $pilotZip -Force }
     Compress-Archive -Path (Join-Path $pilotPackage '*') -DestinationPath $pilotZip -CompressionLevel Optimal
     $pilotHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $pilotZip).Hash.ToLowerInvariant()
@@ -343,7 +388,7 @@ Write-Host "Taille            : $apiTarBytes octets"
 Write-Host "SHA-256           : $apiHash"
 
 Write-Host "`nVALIDATION PHASE 3 TERMINEE" -ForegroundColor Green
-Write-Host 'Attendu : 0 echec, au moins 120 cas de test executes.'
+Write-Host 'Attendu : 0 echec, au moins 250 cas de test executes.'
 Write-Host 'Attendu : canPrepareForHost=true, canImportPortableArtifact=true, canLaunchGame=true.'
 Write-Host 'IMPORTANT : FeatureGates__AllowHostTransfer=false ET EnableWgsTransfer=false.'
 Write-Host 'Ce build ne contacte pas le NAS et n ecrit pas dans WGS.'

@@ -28,6 +28,10 @@ if (Test-Path -LiteralPath $statePath) {
     Write-Host "État persistant : pas encore créé"
 }
 
+# Present/absent uniquement : jamais son nom logique, qui n'est jamais affiché à l'utilisateur.
+$managedSlotPath = Join-Path $env:ProgramData "GameSaveHub\managed-slot.json"
+Write-Host "Slot local permanent : $(if (Test-Path -LiteralPath $managedSlotPath) { 'enregistré' } else { 'non configuré' })"
+
 try {
     $health = Invoke-WebRequest -UseBasicParsing -Uri "https://saves.stevenpwlk.fr:18443/healthz"
     Write-Host "NAS /healthz : HTTP $($health.StatusCode) $($health.Content.Trim())"
