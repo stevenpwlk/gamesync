@@ -109,3 +109,13 @@ public sealed class IdempotencyEntity
     public required string ResponseJson { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
 }
+
+public sealed class ClientReleaseEntity
+{
+    public Guid Id { get; set; }
+    public required string Version { get; set; }
+    public required string Sha256 { get; set; }
+    public required string Signature { get; set; }
+    public long Length { get; set; }
+    public DateTimeOffset PublishedAtUtc { get; set; }
+}

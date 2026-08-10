@@ -14,6 +14,7 @@ public sealed class GameSaveHubDbContext(DbContextOptions<GameSaveHubDbContext> 
     public DbSet<UploadChunkEntity> UploadChunks => Set<UploadChunkEntity>();
     public DbSet<IdempotencyEntity> Idempotency => Set<IdempotencyEntity>();
     public DbSet<AdminAuditEntity> AdminAudit => Set<AdminAuditEntity>();
+    public DbSet<ClientReleaseEntity> ClientReleases => Set<ClientReleaseEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -30,6 +31,8 @@ public sealed class GameSaveHubDbContext(DbContextOptions<GameSaveHubDbContext> 
         modelBuilder.Entity<UploadChunkEntity>().HasKey(x => new { x.UploadId, x.Index });
         modelBuilder.Entity<IdempotencyEntity>().HasKey(x => new { x.DeviceId, x.Key, x.Route });
         modelBuilder.Entity<AdminAuditEntity>().HasIndex(x => x.PerformedAtUtc);
+        modelBuilder.Entity<ClientReleaseEntity>().HasIndex(x => x.Version).IsUnique();
+        modelBuilder.Entity<ClientReleaseEntity>().HasIndex(x => x.PublishedAtUtc);
 
         // SQLite ne sait ni ordonner ni comparer DateTimeOffset. Toutes les valeurs sont UTC et stockées en entier.
         modelBuilder.Entity<WorldEntity>().Property(x => x.CreatedAtUtc).HasConversion<long>();
@@ -48,5 +51,6 @@ public sealed class GameSaveHubDbContext(DbContextOptions<GameSaveHubDbContext> 
         modelBuilder.Entity<UploadChunkEntity>().Property(x => x.ReceivedAtUtc).HasConversion<long>();
         modelBuilder.Entity<IdempotencyEntity>().Property(x => x.CreatedAtUtc).HasConversion<long>();
         modelBuilder.Entity<AdminAuditEntity>().Property(x => x.PerformedAtUtc).HasConversion<long>();
+        modelBuilder.Entity<ClientReleaseEntity>().Property(x => x.PublishedAtUtc).HasConversion<long>();
     }
 }

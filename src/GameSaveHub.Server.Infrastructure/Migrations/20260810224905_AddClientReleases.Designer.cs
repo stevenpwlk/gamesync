@@ -3,6 +3,7 @@ using System;
 using GameSaveHub.Server.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GameSaveHub.Server.Infrastructure.Migrations
 {
     [DbContext(typeof(GameSaveHubDbContext))]
-    partial class GameSaveHubDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260810224905_AddClientReleases")]
+    partial class AddClientReleases
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
