@@ -63,7 +63,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__GameSaveHub: Data Source=/data/gamesavehub.db;Cache=Shared;Pooling=True
       Storage__Root: /data
-      Storage__MaxArtifactBytes: ${GSH_MAX_ARTIFACT_BYTES:-67108864}
+      Storage__MaxArtifactBytes: ${GSH_MAX_ARTIFACT_BYTES:-209715200}
       Storage__MaxChunkBytes: ${GSH_MAX_CHUNK_BYTES:-4194304}
       FeatureGates__AllowHostTransfer: ${GSH_ALLOW_HOST_TRANSFER:-false}
       Authentication__Issuer: GameSaveHub
@@ -115,7 +115,7 @@ services:
     environment:
       GSH_CONNECTION_STRING: Data Source=/data/gamesavehub.db;Cache=Shared;Pooling=True
       GSH_STORAGE_ROOT: /data
-      GSH_MAX_ARTIFACT_BYTES: ${GSH_MAX_ARTIFACT_BYTES:-67108864}
+      GSH_MAX_ARTIFACT_BYTES: ${GSH_MAX_ARTIFACT_BYTES:-209715200}
       GSH_RETENTION_LATEST: ${GSH_RETENTION_LATEST:-20}
       GSH_RETENTION_DAILY: ${GSH_RETENTION_DAILY:-30}
       GSH_RETENTION_WEEKLY: ${GSH_RETENTION_WEEKLY:-26}
