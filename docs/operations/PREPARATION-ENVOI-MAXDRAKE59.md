@@ -32,9 +32,14 @@ Le pseudo de MaxDrake59 tel qu'il apparaît réellement dans le monde partagé a
 - Recalculer vous-même le SHA-256 du fichier que vous envoyez réellement, pas seulement celui indiqué plus haut.
 - Vérifier que `GET /api/v1/client/latest` pointe vers une version réelle et cohérente (pas un paquet de test) — sinon le PC de MaxDrake59 tentera une mise à jour vers ce paquet dès le premier passage de la tâche planifiée.
 
-## Différence avec l'onboarding de Bob (Lot 2)
+## Quelle configuration initiale l'attend ? (corrigé le 12 août 2026)
 
-Contrairement à Bob, MaxDrake59 a déjà un personnage existant dans le monde partagé actuel (il a rejoint en direct une session hébergée par Bob avant cet envoi). Il n'aura donc **pas** à passer par la configuration unique en deux étapes (créer un nouveau monde nommé `GSH-MONDE-PARTAGE` dans le jeu) : l'accueil lui proposera directement **« Rattacher ce monde »**, comme cela avait été fait sur le PC de Steven lui-même lors de la première configuration du Lot 2.
+MaxDrake59 a déjà un personnage dans le monde partagé (il a rejoint en direct une session hébergée par Bob), mais ça ne dit rien de l'état de **son propre stockage Xbox local** — rejoindre une session hébergée par quelqu'un d'autre ne crée pas forcément de sauvegarde locale persistante sur sa machine à lui. Deux cas restent donc possibles à l'installation, et impossibles à distinguer sans être devant son écran :
+
+- **Un monde nommé `GSH-MONDE-PARTAGE` existe déjà localement chez lui, non lié** → l'accueil affichera « Un monde partagé existant a été trouvé », un seul clic sur « Rattacher ce monde ».
+- **Aucun monde de ce nom n'existe encore localement chez lui** (le cas le plus probable pour un premier joueur qui n'a fait que rejoindre en invité) → l'accueil affichera « Configurons ce PC », la configuration unique en deux étapes (créer une nouvelle partie nommée exactement `GSH-MONDE-PARTAGE` dans le jeu, comme cela avait été fait pour Steven et pour Bob lors de leurs propres premières configurations).
+
+Le guide `GUIDE-MAXDRAKE59.html` couvre les deux cas et explique lequel suivre selon ce qui s'affiche réellement à l'écran.
 
 ## Point de vigilance — installation moins guidée qu'avant
 
