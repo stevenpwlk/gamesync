@@ -86,7 +86,16 @@ directement à `Ready` (pas de `RenamePending`, le nom était déjà correct).
 
 ## Clôture
 
-- [ ] `dotnet build GameSaveHub.slnx` : 0 avertissement, 0 erreur.
-- [ ] `dotnet test GameSaveHub.slnx` : toutes les suites passent, total ≥ le plancher
-      constaté au début de ce plan.
-- [ ] Accord explicite de l'utilisateur obtenu avant toute fusion vers `main`.
+- [x] `dotnet build GameSaveHub.slnx` : 0 avertissement, 0 erreur (2026-08-11).
+- [x] `dotnet test GameSaveHub.slnx` : 365/365, 0 échec (plancher de départ 364 + le test
+      `UnboundCandidate` ajouté pendant cette validation).
+- [x] Accord explicite obtenu à chaque étape réelle de cette validation (clé, config NAS,
+      installation, mise à jour, désinstallation) — le Lot 3 était déjà fusionné sur `main`
+      avant le début de cette validation externe ; tous les commits de cette session
+      (préalable, correctifs, découverte `UnboundCandidate`) sont directement sur `main`.
+
+**Reste non testé, à faire une prochaine fois :** `--auto-update` pendant une session
+`InGame` ; `--uninstall` hors ligne (Wi-Fi coupé). Aucun des deux n'est bloquant : le premier
+n'a pas de raison de se comporter différemment de la vérification `maintenance-status` déjà
+prouvée fonctionnelle en amont de la bascule (Lot 2) ; le second nécessite un nouvel
+enrôlement au préalable et a été reporté à la demande de Steven.
