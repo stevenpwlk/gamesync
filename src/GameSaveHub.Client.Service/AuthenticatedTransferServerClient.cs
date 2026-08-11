@@ -177,7 +177,7 @@ public sealed class AuthenticatedTransferServerClient(
             using var response = await SendAuthorizedAsync(request, cancellationToken);
             return response.IsSuccessStatusCode;
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or TransferServerException)
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or TransferServerException)
         {
             return false;
         }
