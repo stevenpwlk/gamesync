@@ -63,7 +63,17 @@ public sealed partial class PipeServerWorker(
         // Rien n'a encore été exécuté à ce stade : la requête n'est même pas désérialisée.
         // Le contrôle du SID reste donc bien antérieur à toute action.
         var connectedSid = GetConnectedSid(pipe);
-        if (!expectedSid.Equals(connectedSid))
+        var isRegisteredPlayer = expectedSid.Equals(connectedSid);
+
+        // La tâche planifiée de mise à jour tourne sous LocalSystem, jamais sous le compte du
+        // joueur. Sans cette exception, GameSaveHub-Setup.exe --auto-update recevait un refus
+        // à chaque exécution, le lisait comme « état de sûreté inconnu » et reportait la mise
+        // à jour indéfiniment : le mécanisme de mise à jour ne pouvait structurellement jamais
+        // aboutir. L'exception est réduite au strict nécessaire — la seule commande en lecture
+        // seule dont l'updater a besoin. Enrôlement, transferts et slot restent réservés au
+        // compte joueur enregistré, y compris pour LocalSystem.
+        var isLocalSystem = connectedSid.IsWellKnown(WellKnownSidType.LocalSystemSid);
+        if (!isRegisteredPlayer && !isLocalSystem)
         {
             LogRejectedClient(logger, connectedSid.Value);
             var refusal = new PipeResponse(
@@ -75,9 +85,23 @@ public sealed partial class PipeServerWorker(
         }
 
         var request = JsonSerializer.Deserialize<PipeRequest>(line, JsonOptions);
-        var response = request is null
-            ? new PipeResponse(false, "invalid_request", "Requête locale invalide.")
-            : await DispatchAsync(request, cancellationToken);
+        PipeResponse response;
+        if (request is null)
+        {
+            response = new PipeResponse(false, "invalid_request", "Requête locale invalide.");
+        }
+        else if (!isRegisteredPlayer && !MaintenanceCommandPolicy.IsAllowedForLocalSystem(request.Command))
+        {
+            LogRejectedClient(logger, connectedSid.Value);
+            response = new PipeResponse(
+                false,
+                "client_not_authorized",
+                "Seul l'état de maintenance est consultable depuis le compte système.");
+        }
+        else
+        {
+            response = await DispatchAsync(request, cancellationToken);
+        }
         await writer.WriteLineAsync(JsonSerializer.Serialize(response, JsonOptions).AsMemory(), cancellationToken);
     }
 
