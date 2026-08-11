@@ -100,20 +100,28 @@ switch ($"{args[0].ToLowerInvariant()} {args[1].ToLowerInvariant()}")
             Root = ReadStorageRoot(),
             MaxArtifactBytes = ReadMaximumArtifactBytes()
         }));
-        await publishStore.PutAsync(publishZipPath, publishActualHash, publishSignedManifest.Version);
+        // Le magasin est adressé par les deux premiers octets du hash : il doit recevoir la
+        // même valeur exacte que celle enregistrée en base, sans quoi le chemin reconstruit
+        // à la lecture (GetObjectPath) diffère par la casse — sans effet sur NTFS, fatal sur
+        // le système de fichiers du NAS. PutAsync revérifie de toute façon le contenu.
+        await publishStore.PutAsync(publishZipPath, publishSignedManifest.Sha256, publishSignedManifest.Version);
         var publishLength = new FileInfo(publishZipPath).Length;
+        // Ce qui est stocké, et donc plus tard servi et vérifié par les postes, ce sont les
+        // valeurs exactes qui ont été signées. Le hash recalculé ci-dessus ne sert qu'à la
+        // vérification, puis est abandonné : republier une variante de casse ou de forme du
+        // hash signé ferait échouer la vérification côté poste pour une raison cosmétique.
         db.ClientReleases.Add(new ClientReleaseEntity
         {
             Id = Guid.NewGuid(),
             Version = publishSignedManifest.Version,
-            Sha256 = publishActualHash,
+            Sha256 = publishSignedManifest.Sha256,
             Signature = publishSignedManifest.Signature,
             Length = publishLength,
             PublishedAtUtc = DateTimeOffset.UtcNow
         });
-        Audit(db, "client-release.publish", publishSignedManifest.Version, "Publication d'une nouvelle version cliente signée.", new { sha256 = publishActualHash, length = publishLength });
+        Audit(db, "client-release.publish", publishSignedManifest.Version, "Publication d'une nouvelle version cliente signée.", new { sha256 = publishSignedManifest.Sha256, length = publishLength });
         await db.SaveChangesAsync();
-        Console.WriteLine($"Version {publishSignedManifest.Version} publiée ({publishLength} octets, sha256 {publishActualHash}).");
+        Console.WriteLine($"Version {publishSignedManifest.Version} publiée ({publishLength} octets, sha256 {publishSignedManifest.Sha256}).");
         return 0;
 
     case "world create":
