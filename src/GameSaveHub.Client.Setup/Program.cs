@@ -5,7 +5,7 @@ return mode switch
 {
     "--install" or "-install" => await RunInstallAsync(),
     "--auto-update" => await Updater.RunAsync(CancellationToken.None),
-    "--uninstall" => Fail("Le mode --uninstall sera disponible après la tâche 11 de ce plan."),
+    "--uninstall" => await RunUninstallAsync(),
     _ => Fail($"Mode inconnu : {mode}")
 };
 
@@ -18,6 +18,18 @@ static async Task<int> RunInstallAsync()
     catch (Exception ex)
     {
         return Fail($"Échec de l'installation : {ex.Message}");
+    }
+}
+
+static async Task<int> RunUninstallAsync()
+{
+    try
+    {
+        return await Uninstaller.RunAsync(CancellationToken.None);
+    }
+    catch (Exception ex)
+    {
+        return Fail($"Échec de la désinstallation : {ex.Message}");
     }
 }
 
