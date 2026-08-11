@@ -40,12 +40,24 @@ avec accord explicite avant toute installation, tâche planifiée ou écriture W
 
 ## Mise à jour silencieuse
 
-- [ ] Une version factice plus récente publiée via `client-release sign` +
-      `client-release publish` est détectée et appliquée par `--auto-update` lancé
-      manuellement, jeu fermé et aucune session active.
+- [x] Version factice `0.5.1` (contenu identique à `0.5.0`, seul `VERSION` change) signée
+      avec la vraie clé privée puis publiée réellement sur le NAS (2026-08-11) via
+      `client-release publish`, détectée et appliquée par `GameSaveHub-Setup.exe
+      --auto-update` lancé manuellement en élevé, jeu fermé, aucune session active
+      (`maintenance-status` confirmé `safeToUpdate: true` juste avant). Découvertes et
+      corrigées au passage : l'image `gamesavehub-api` déployée (`0.4.0`) et l'image
+      `gamesavehub-admin` (`0.1.1`) étaient toutes deux en retard sur `main` — reconstruites
+      en `gamesavehub-api:0.5.0` et `gamesavehub-admin:0.1.2` ; la migration EF
+      `AddClientReleases` n'avait jamais été appliquée à la base réelle — appliquée
+      (`database migrate`, additive uniquement) ; la limite `GSH_MAX_ARTIFACT_BYTES`
+      (64 Mo par défaut) était trop petite pour un paquet Setup complet (~102 Mo, runtime
+      .NET self-contained) — relevée à 200 Mo pour `api` et `admin` (commit `4941651`).
 - [ ] Lancée pendant une session `InGame` : `--auto-update` ne touche à rien et se
-      termine proprement (vérifier via les journaux de diagnostic).
-- [ ] Après application, le service redémarre et répond au tube nommé en moins de 30 s.
+      termine proprement (vérifier via les journaux de diagnostic). **Non testé** — nécessite
+      de lancer réellement le jeu, reporté à la demande de Steven.
+- [x] Après application, le service redémarre et répond au tube nommé en moins de 30 s :
+      confirmé, `home-context` répond immédiatement après la bascule (2026-08-11), deviceId
+      et pseudo identiques à avant (`79fd2323-53c0-45fc-9dc0-e3e7720922d7` / `Stevenpwlk`).
 
 ## Désinstallation
 
