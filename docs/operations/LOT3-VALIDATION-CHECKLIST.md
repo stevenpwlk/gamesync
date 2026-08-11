@@ -5,12 +5,19 @@ avec accord explicite avant toute installation, tâche planifiée ou écriture W
 
 ## Préalable bloquant
 
-- [ ] Steven a généré sa propre paire de clés ECDSA P-256 de production (hors dépôt,
-      hors NAS) et remplacé la clé publique de test dans
-      `src/GameSaveHub.Client.Setup/ClientReleasePublicKey.cs` par la vraie clé publique.
-- [ ] La même clé publique de production est configurée dans la variable d'environnement
-      `GSH_CLIENT_RELEASE_PUBLIC_KEY_PEM` du service `admin` sur le NAS
-      (`deploy/compose.yml` ou l'équivalent Portainer déjà utilisé pour `gamesavehub-admin`).
+- [x] Steven a généré sa propre paire de clés ECDSA P-256 de production (hors dépôt,
+      hors NAS, hors OneDrive) et remplacé la clé publique de test dans
+      `src/GameSaveHub.Client.Setup/ClientReleasePublicKey.cs` par la vraie clé publique
+      (commit `b7dfb2f`, 2026-08-11).
+- [x] Décision prise sur la diffusion de la même clé publique côté NAS : puisque le
+      conteneur `admin` tourne en ponctuel (`docker run` à la demande, jamais comme
+      service Portainer persistant), la variable `GSH_CLIENT_RELEASE_PUBLIC_KEY_PEM` sera
+      passée directement sur la ligne de commande à chaque exécution réelle de
+      `client-release publish`, plutôt que stockée en permanence dans le stack — décision
+      validée avec Steven le 2026-08-11. `deploy/compose.yml` documente la variable
+      requise (commit `9c4f59c`) pour quiconque déploierait `admin` en service persistant
+      un jour. **Reste à vérifier à la première exécution réelle de `client-release
+      publish`, plus bas dans cette checklist.**
 
 ## Installation
 
