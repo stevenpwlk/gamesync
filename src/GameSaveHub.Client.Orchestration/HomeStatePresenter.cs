@@ -64,7 +64,12 @@ public static class HomeStatePresenter
             1,
             HomePrimaryAction.ConfigureManagedSlot,
             "Configurer ce PC"),
-        ManagedSlotStatus.LegacyCandidate => View(
+        // UnboundCandidate : un monde nommé GSH-MONDE-PARTAGE existe déjà (topologie déjà
+        // vérifiée par ManagedSlotResolver) mais ce PC n'a pas de managed-slot.json local —
+        // notamment après une réinstallation complète (désinstallation Lot 3 puis
+        // réinstallation). Même rattachement explicite que LegacyCandidate ; contrairement à
+        // celui-ci le nom est déjà correct, donc aucun renommage ne suivra.
+        ManagedSlotStatus.LegacyCandidate or ManagedSlotStatus.UnboundCandidate => View(
             HomeVisualState.ManagedSlotRebind,
             "Un monde partagé existant a été trouvé",
             "Rattachez-le pour continuer à l'utiliser comme emplacement permanent de ce PC.",

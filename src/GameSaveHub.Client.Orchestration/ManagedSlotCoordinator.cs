@@ -71,7 +71,7 @@ public sealed class ManagedSlotCoordinator(
         }
 
         var resolution = ManagedSlotResolver.Resolve(null, inspection, inspection.PackageFamilyName, playerName);
-        if (resolution.Status != ManagedSlotStatus.LegacyCandidate || resolution.Candidate is null)
+        if (resolution.Status is not (ManagedSlotStatus.LegacyCandidate or ManagedSlotStatus.UnboundCandidate) || resolution.Candidate is null)
         {
             return new ManagedSlotBindResult(
                 false,
@@ -84,7 +84,7 @@ public sealed class ManagedSlotCoordinator(
         // doit rester la plus courte possible pour ne jamais lier un candidat qui vient de changer.
         var reinspection = await adapter.InspectLocalStorageAsync(cancellationToken);
         var reresolution = ManagedSlotResolver.Resolve(null, reinspection, reinspection.PackageFamilyName, playerName);
-        if (reresolution.Status != ManagedSlotStatus.LegacyCandidate || reresolution.Candidate is null ||
+        if (reresolution.Status is not (ManagedSlotStatus.LegacyCandidate or ManagedSlotStatus.UnboundCandidate) || reresolution.Candidate is null ||
             !reresolution.Candidate.LogicalName.Equals(resolution.Candidate.LogicalName, StringComparison.OrdinalIgnoreCase))
         {
             return new ManagedSlotBindResult(false, "managed_slot_candidate_changed", "Le slot candidat a changé pendant la vérification. Relancez le rattachement.", null);

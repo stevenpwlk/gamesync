@@ -27,6 +27,27 @@ public sealed class ManagedSlotCoordinatorTests
     }
 
     [Fact]
+    public async Task BindExistingSucceedsForSoleUnboundCandidateAndWritesOnlyTheBinding()
+    {
+        // UnboundCandidate : le monde porte déjà le nom permanent (par ex. après une
+        // désinstallation complète Lot 3 suivie d'une réinstallation) — pas de renommage
+        // à venir, donc CurrentDisplayName == DesiredDisplayName dès l'écriture.
+        var (coordinator, adapter, slotStore, _, _) = CreateHarness();
+        adapter.Inspection = InspectionWith(Ready("Standard-5.json"));
+
+        var result = await coordinator.BindExistingAsync(Player);
+
+        Assert.True(result.Success);
+        Assert.Equal("managed_slot_bound", result.Code);
+        var binding = await slotStore.ReadAsync();
+        Assert.NotNull(binding);
+        Assert.Equal("Standard-5.json", binding!.LogicalName);
+        Assert.Equal(ManagedSlotResolver.PermanentDisplayName, binding.CurrentDisplayName);
+        Assert.Equal(ManagedSlotResolver.PermanentDisplayName, binding.DesiredDisplayName);
+        Assert.Equal(2, adapter.InspectCalls);
+    }
+
+    [Fact]
     public async Task BindExistingRefusesWhenAlreadyBound()
     {
         var (coordinator, adapter, slotStore, _, _) = CreateHarness();

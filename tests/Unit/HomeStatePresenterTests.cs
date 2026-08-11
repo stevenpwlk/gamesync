@@ -104,17 +104,24 @@ public sealed class HomeStatePresenterTests
         Assert.Equal("Prendre la main", view.PrimaryActionLabel);
     }
 
-    [Fact]
-    public void LegacyCandidateOffersExplicitRebind()
+    [Theory]
+    [InlineData(ManagedSlotStatus.LegacyCandidate)]
+    [InlineData(ManagedSlotStatus.UnboundCandidate)]
+    public void CandidateStatusesOfferExplicitRebind(ManagedSlotStatus status)
     {
-        var view = HomeStatePresenter.Present(Context(slot: ManagedSlotStatus.LegacyCandidate));
+        // UnboundCandidate se produit désormais légitimement après une désinstallation
+        // complète (Lot 3) suivie d'une réinstallation : le monde GSH-MONDE-PARTAGE existe
+        // déjà, mais ce PC n'a plus de managed-slot.json local. ResolveCandidate garantit
+        // les mêmes vérifications de topologie (hôte unique, id 0, joueur correspondant)
+        // que pour LegacyCandidate ; le rattacher exige toujours un clic explicite du joueur,
+        // jamais automatique.
+        var view = HomeStatePresenter.Present(Context(slot: status));
 
         Assert.Equal(HomeVisualState.ManagedSlotRebind, view.State);
         Assert.Equal(HomePrimaryAction.BindExistingManagedSlot, view.PrimaryAction);
     }
 
     [Theory]
-    [InlineData(ManagedSlotStatus.UnboundCandidate)]
     [InlineData(ManagedSlotStatus.BoundSlotMissing)]
     [InlineData(ManagedSlotStatus.BindingMismatch)]
     [InlineData(ManagedSlotStatus.InvalidTopology)]
