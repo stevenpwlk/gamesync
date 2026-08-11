@@ -60,7 +60,18 @@ public static class Installer
         Directory.CreateDirectory(appRoot);
         Directory.CreateDirectory(programDataRoot);
 
+        // Le payload est le dossier livré à côté de l'exécutable, pas quelque chose qui y est
+        // embarqué : la copie installée dans %ProgramFiles% (celle que vise la tâche planifiée)
+        // ne le contient volontairement pas, puisque --auto-update télécharge le sien. Lancer
+        // cette copie en mode installation doit donc le dire clairement plutôt que d'échouer
+        // sur un chemin introuvable.
         var payloadRoot = Path.Combine(AppContext.BaseDirectory, "payload");
+        if (!Directory.Exists(payloadRoot))
+        {
+            throw new InvalidOperationException(
+                $"Dossier « payload » introuvable à côté de l'exécutable ({payloadRoot}). " +
+                "Lancez GameSaveHub-Setup.exe depuis le dossier d'installation livré, tel quel, sans déplacer l'exécutable seul.");
+        }
         CopyDirectory(Path.Combine(payloadRoot, "Service"), serviceRoot);
         CopyDirectory(Path.Combine(payloadRoot, "App"), appRoot);
         WriteInstalledVersion(Path.Combine(payloadRoot, "VERSION"));
