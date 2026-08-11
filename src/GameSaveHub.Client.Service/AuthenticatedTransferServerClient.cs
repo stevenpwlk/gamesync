@@ -8,6 +8,19 @@ using Microsoft.Extensions.Options;
 
 namespace GameSaveHub.Client.Service;
 
+/// <summary>Issue d'une demande de révocation d'appareil, du point de vue du poste.</summary>
+public enum RevokeSelfOutcome
+{
+    /// <summary>Le serveur a bien révoqué cet appareil (ou il n'y avait rien à révoquer).</summary>
+    Revoked,
+
+    /// <summary>Le serveur a refusé : une session est encore active sur cet appareil (409).</summary>
+    ActiveSessionBlocked,
+
+    /// <summary>Le serveur n'a pas pu être joint ou a répondu une autre erreur.</summary>
+    Unreachable
+}
+
 public sealed class AuthenticatedTransferServerClient(
     HttpClient http,
     IOptions<ClientServiceOptions> options,
@@ -165,21 +178,27 @@ public sealed class AuthenticatedTransferServerClient(
     }
 
     /// <summary>
-    /// Révoque cet appareil côté serveur avant une désinstallation. Ne lève jamais :
-    /// un échec (hors ligne, serveur injoignable, déjà révoqué) doit laisser
-    /// l'appelant décider de continuer la suppression locale quand même.
+    /// Révoque cet appareil côté serveur avant une désinstallation. Ne lève jamais, mais
+    /// distingue les trois issues, qui appellent trois conduites différentes côté
+    /// désinstallation. Le <c>409 device_has_active_session</c> existe précisément pour
+    /// qu'une révocation n'orpheline jamais une écriture en cours (§7 de la spécification) :
+    /// le confondre avec « serveur injoignable », comme le faisait le <c>bool</c> initial,
+    /// revenait à jeter ce signal et à désinstaller quand même.
     /// </summary>
-    public async Task<bool> RevokeSelfAsync(CancellationToken cancellationToken = default)
+    public async Task<RevokeSelfOutcome> RevokeSelfAsync(CancellationToken cancellationToken = default)
     {
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, Api("device/revoke-self"));
             using var response = await SendAuthorizedAsync(request, cancellationToken);
-            return response.IsSuccessStatusCode;
+            if (response.IsSuccessStatusCode) return RevokeSelfOutcome.Revoked;
+            return response.StatusCode == HttpStatusCode.Conflict
+                ? RevokeSelfOutcome.ActiveSessionBlocked
+                : RevokeSelfOutcome.Unreachable;
         }
         catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or TransferServerException)
         {
-            return false;
+            return RevokeSelfOutcome.Unreachable;
         }
     }
 
