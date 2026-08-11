@@ -72,6 +72,18 @@ avec accord explicite avant toute installation, tâche planifiée ou écriture W
       l'échec de révocation, message de rappel affiché. **Nécessite un nouvel enrôlement au
       préalable** (le device précédent est révoqué) — reste à faire.
 
+**Bug réel trouvé et corrigé pendant ce test (2026-08-11, commit `42eab12`) :** après
+réinstallation, l'accueil affichait « Le slot du monde doit être vérifié » (arrêt de sûreté)
+au lieu de proposer un rattachement — `ManagedSlotResolver` renvoie `UnboundCandidate` quand
+le monde `GSH-MONDE-PARTAGE` existe déjà mais qu'aucun `managed-slot.json` local ne le lie
+(exactement ce que produit une désinstallation complète suivie d'une réinstallation).
+`HomeStatePresenter` et `ManagedSlotCoordinator.BindExistingAsync` ne géraient que
+`LegacyCandidate`. Ce cas ne pouvait pas se produire avant le Lot 3 (`ProgramData` n'était
+jamais entièrement supprimé). Corrigé : `UnboundCandidate` traité comme `LegacyCandidate`
+(mêmes garanties de topologie déjà vérifiées par `ResolveCandidate`). Revalidé en réel sur
+PC-STEVEN : `managed-slot-bind-existing` → `managed_slot_bound`, `managedSlotStatus` passé
+directement à `Ready` (pas de `RenamePending`, le nom était déjà correct).
+
 ## Clôture
 
 - [ ] `dotnet build GameSaveHub.slnx` : 0 avertissement, 0 erreur.
