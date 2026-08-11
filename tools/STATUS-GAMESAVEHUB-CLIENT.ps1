@@ -8,8 +8,15 @@ if ($null -eq $service) {
     Write-Host "Service : $($service.Status)"
 }
 
-$config = Join-Path $env:ProgramFiles "GameSaveHub\Client\Service\appsettings.local.json"
+# Depuis le Lot 3, la configuration machine vit hors du dossier d'installation, qui est
+# renommé en bloc à chaque mise à jour. L'ancien emplacement reste consulté en repli, le
+# temps que tous les postes soient passés par le nouvel installateur.
+$config = Join-Path $env:ProgramData "GameSaveHub\appsettings.local.json"
+if (-not (Test-Path -LiteralPath $config)) {
+    $config = Join-Path $env:ProgramFiles "GameSaveHub\Client\Service\appsettings.local.json"
+}
 if (Test-Path -LiteralPath $config) {
+    Write-Host "Configuration locale : $config"
     $settings = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
     Write-Host "SID configuré : $($settings.ClientService.RegisteredUserSid)"
     Write-Host "Serveur : $($settings.ClientService.ServerBaseUrl)"
