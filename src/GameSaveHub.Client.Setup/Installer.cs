@@ -81,11 +81,14 @@ public static class Installer
         if (!File.Exists(serviceExe)) throw new InvalidOperationException($"EXE service absent : {serviceExe}");
         if (!File.Exists(appExe)) throw new InvalidOperationException($"EXE application absent : {appExe}");
 
-        // Cet exécutable ne propose pas de commutateur d'ouverture du verrou : il installe
-        // le package STANDARD. Sur une réinstallation, la valeur déjà en place est reprise
-        // telle quelle plutôt que refermée en silence — c'est la seule façon de ne pas
-        // casser un poste pilote au premier passage de l'installateur unique.
-        var enableWgsTransfer = previousGate ?? false;
+        // Le verrou serveur (FeatureGates:AllowHostTransfer) est la vraie barrière de
+        // production ; celui-ci n'est qu'une seconde précaution locale, utile tant que
+        // Lot 3 tournait en préflight. Un poste neuf (sans config précédente, donc jamais
+        // installé même en Lot 2) l'ouvre désormais directement : un joueur qui reçoit ce
+        // paquet doit pouvoir jouer sans édition manuelle de fichier. Sur une réinstallation,
+        // la valeur déjà en place est reprise telle quelle plutôt que modifiée en silence —
+        // ça reste la seule façon de ne pas casser, ni rouvrir à son insu, un poste existant.
+        var enableWgsTransfer = previousGate ?? true;
         MachineConfig.Write(SetupPaths.MachineConfigPath, sid, localAppData, serverBaseUrl, enableWgsTransfer);
 
         var managedSlotAlreadyBound = File.Exists(Path.Combine(programDataRoot, "managed-slot.json"));
@@ -124,9 +127,15 @@ public static class Installer
         Console.WriteLine(enableWgsTransfer
             ? "Écriture des sauvegardes : ACTIVÉE sur ce PC (EnableWgsTransfer=true)."
             : "Écriture des sauvegardes : DÉSACTIVÉE (EnableWgsTransfer=false).");
-        if (previousGate is not null && previousGate.Value)
+        if (previousGate is not null)
         {
-            Console.WriteLine("Verrou d'écriture : valeur ouverte conservée depuis l'installation précédente.");
+            Console.WriteLine(previousGate.Value
+                ? "Verrou d'écriture : valeur ouverte conservée depuis l'installation précédente."
+                : "Verrou d'écriture : valeur fermée conservée depuis l'installation précédente.");
+        }
+        else
+        {
+            Console.WriteLine("Verrou d'écriture : ouvert par défaut (premier poste, aucune configuration précédente).");
         }
         Console.WriteLine(managedSlotAlreadyBound
             ? "Slot local permanent : déjà enregistré sur ce PC (conservé lors de cette installation)."
