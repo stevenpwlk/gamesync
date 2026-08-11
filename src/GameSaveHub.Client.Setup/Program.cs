@@ -1,0 +1,16 @@
+using GameSaveHub.Client.Setup;
+
+var mode = args.Length > 0 ? args[0] : "--install";
+return mode switch
+{
+    "--install" or "-install" => await Installer.RunAsync("https://saves.stevenpwlk.fr:18443/", CancellationToken.None),
+    "--auto-update" => Fail("Le mode --auto-update sera disponible après la tâche 10 de ce plan."),
+    "--uninstall" => Fail("Le mode --uninstall sera disponible après la tâche 11 de ce plan."),
+    _ => Fail($"Mode inconnu : {mode}")
+};
+
+static int Fail(string message)
+{
+    Console.Error.WriteLine(message);
+    return 3;
+}

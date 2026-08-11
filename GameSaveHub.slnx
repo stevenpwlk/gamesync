@@ -6,6 +6,7 @@
     <Project Path="src/GameSaveHub.Client.Orchestration/GameSaveHub.Client.Orchestration.csproj" />
     <Project Path="src/GameSaveHub.Client.Probe/GameSaveHub.Client.Probe.csproj" />
     <Project Path="src/GameSaveHub.Client.Service/GameSaveHub.Client.Service.csproj" />
+    <Project Path="src/GameSaveHub.Client.Setup/GameSaveHub.Client.Setup.csproj" />
     <Project Path="src/GameSaveHub.Contracts/GameSaveHub.Contracts.csproj" />
     <Project Path="src/GameSaveHub.Core/GameSaveHub.Core.csproj" />
     <Project Path="src/GameSaveHub.Diagnostics/GameSaveHub.Diagnostics.csproj" />
