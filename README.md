@@ -2,7 +2,7 @@
 
 Partager en toute sûreté un monde multijoueur **The Planet Crafter** (PC Game Pass) entre plusieurs PC Windows 11 avec des comptes Xbox différents, chacun pouvant devenir hôte à son tour et retrouver le point exact où les autres se sont arrêtés.
 
-**État au 9 août 2026 : `main` = Lot 1 fusionné (mini-exporteur + remplacement administratif du monde partagé, 153/153 tests). Le Lot 2 (accueil contextuel, lancement Xbox direct, slot local permanent `GSH-MONDE-PARTAGE`) est en cours sur la branche `codex/v1-lot2-contextual-app` et n'est pas encore fusionné.**
+**État au 11 août 2026 : `main` = Lot 1 fusionné (mini-exporteur + remplacement administratif du monde partagé, 153/153 tests). Le Lot 2 (accueil contextuel, lancement Xbox direct, slot local permanent `GSH-MONDE-PARTAGE`) est en cours sur la branche `codex/v1-lot2-contextual-app` et n'est pas encore fusionné. Le Lot 3 (installateur unique signé + mises à jour à distance) est en cours sur sa propre branche `codex/v1-lot3-setup-updater` — implémentation automatisée terminée, aucune validation réelle sur PC physique.**
 
 > 📍 **Source de vérité sur l'avancement réel** (fait / en cours / porte externe à faire valider avec Bob) : [`docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md`](docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md). Le dossier `docs/etat-des-lieux-2026-08-08/` est une archive figée au 8-9 août ; il ne reflète plus l'état courant.
 
@@ -13,6 +13,7 @@ Partager en toute sûreté un monde multijoueur **The Planet Crafter** (PC Game 
 | Connaître l'avancement réel (fait/en cours/portes externes) | [Checklist de validation](docs/operations/CLIENT-ORCHESTRATOR-VALIDATION-CHECKLIST.md) |
 | Comprendre l'architecture | [ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Comprendre le design du slot permanent (Lot 2) | [Spécification](docs/superpowers/specs/2026-08-09-permanent-local-slot-design.md), [Plan d'implémentation](docs/superpowers/plans/2026-08-09-permanent-local-slot-implementation.md) |
+| Comprendre l'installateur unique et les mises à jour à distance (Lot 3, en cours) | [LOT3-SETUP-UPDATER.md](docs/operations/LOT3-SETUP-UPDATER.md) |
 | Savoir ce qui a été prouvé expérimentalement | [Validation cross-PC](docs/investigation/CROSS-PC-VALIDATION-2026-08.md) et [les preuves](docs/evidence/README.md) |
 | Déployer la Phase 3 | [Protocole de déploiement](docs/deployment/PROTOCOLE-DEPLOIEMENT-PHASE3-0.3.0.md) |
 | Déployer ou administrer le NAS | [DEPLOYMENT.md](docs/nas/DEPLOYMENT.md), [ADMIN.md](docs/operations/ADMIN.md) |
