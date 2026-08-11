@@ -61,10 +61,16 @@ avec accord explicite avant toute installation, tâche planifiée ou écriture W
 
 ## Désinstallation
 
-- [ ] `--uninstall` en ligne : révocation confirmée côté serveur (`device list` ne
-      montre plus l'appareil comme actif), service/app/tâche/ProgramData supprimés.
+- [x] `--uninstall` en ligne (2026-08-11, PC-STEVEN) : révocation confirmée côté serveur —
+      `device list` montre `79fd2323-53c0-45fc-9dc0-e3e7720922d7` (PC-STEVEN) passé de
+      `actif` à `révoqué`. Service `GameSaveHubClient` supprimé (`Get-Service` ne le trouve
+      plus), `%ProgramData%\GameSaveHub` supprimé en entier, raccourci Démarrer supprimé.
+      Résidu mineur attendu : `GameSaveHub-Setup.exe` lui-même reste dans
+      `%ProgramFiles%\GameSaveHub\` car verrouillé pendant qu'il s'exécute (comportement
+      documenté dans le code, pas un défaut — sera écrasé à la prochaine installation).
 - [ ] `--uninstall` hors ligne (Wi-Fi coupé) : suppression locale complète malgré
-      l'échec de révocation, message de rappel affiché.
+      l'échec de révocation, message de rappel affiché. **Nécessite un nouvel enrôlement au
+      préalable** (le device précédent est révoqué) — reste à faire.
 
 ## Clôture
 
