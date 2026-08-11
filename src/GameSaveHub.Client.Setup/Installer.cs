@@ -16,6 +16,10 @@ public static class Installer
         var appRoot = Path.Combine(installRoot, "App");
         var programDataRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GameSaveHub");
 
+        var principal = new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent());
+        if (!principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator))
+            throw new InvalidOperationException("L'installation doit être lancée en tant qu'administrateur.");
+
         var sid = System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value
             ?? throw new InvalidOperationException("Identité Windows introuvable.");
         if (ServiceAccountGuard.IsReservedAccount(sid))
@@ -31,6 +35,8 @@ public static class Installer
                     existing.Stop();
                     existing.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20));
                 }
+                RunSc($"delete {ServiceName}");
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
             }
         }
 
