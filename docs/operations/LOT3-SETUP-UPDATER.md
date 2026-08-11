@@ -21,7 +21,7 @@ Code : `src/GameSaveHub.Client.Setup/Program.cs` (aiguillage des modes), `Instal
 ## Les deux nouveaux endpoints serveur
 
 - `GET /api/v1/client/latest` — **non authentifié** (un poste tout juste installé n'a pas encore d'identité enrôlée). Renvoie `version`, `sha256` du paquet, `signature` ECDSA du manifeste et `downloadUrl`.
-- `GET /api/v1/client/packages/{version}` — **non authentifié**, sert le paquet `.zip` immuable depuis le même `ImmutableArtifactStore` (`data/objects/`) déjà utilisé pour les sauvegardes.
+- `GET /api/v1/client/packages/{version}` — **non authentifié**, sert le paquet `.zip` immuable via `ClientReleaseObjectStore`, un magasin sœur d'`ImmutableArtifactStore` — même racine `data/objects/` et même principe d'adressage par contenu, mais sans la validation d'enveloppe `.gshsave` puisqu'un paquet client n'est pas une sauvegarde de jeu (sous-arborescence dédiée `data/objects/client-releases/`).
 - `POST /api/v1/device/revoke-self` — **authentifié** (même signature d'identité machine CNG que les autres requêtes). `204` en cas de révocation réussie ; `409 device_has_active_session` si le device détient une session serveur active, en protection côté serveur en complément de la vérification locale de `maintenance-status`.
 
 ## Les deux nouvelles commandes admin
