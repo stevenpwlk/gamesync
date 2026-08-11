@@ -4,12 +4,11 @@ Ce document est pour vous (Steven). Le guide destiné à MaxDrake59 est une page
 
 ## Ce qu'il faut envoyer
 
-1. **Le paquet installeur**, un seul fichier ZIP contenant l'exécutable et son dossier de dépendances :
+1. **Un seul fichier ZIP**, tout compris :
    - Fichier : `artifacts\GameSaveHub-pour-MaxDrake59.zip`
    - Empreinte à recalculer avant l'envoi avec `Get-FileHash -Algorithm SHA256` — c'est cette valeur-là qui fait foi, pas celle notée ici si le paquet a été reconstruit depuis.
-   - Ce zip contient `GameSaveHub-Setup.exe` + le dossier `payload\` (Service + App) + `VERSION` — les trois doivent rester ensemble, ce n'est pas un simple exécutable autonome.
-2. **`GUIDE-MAXDRAKE59.html`**, dans le même envoi ou un envoi séparé.
-3. **Un code d'invitation**, généré **juste avant l'envoi** (il expire — ne le générez pas la veille), transmis par un canal séparé du fichier ZIP par simple prudence :
+   - Contenu : `GameSaveHub-Setup.exe`, le dossier `payload\` (Service + App), `VERSION`, et `LISEZ-MOI-DABORD.html` (le guide, copié depuis [`GUIDE-MAXDRAKE59.html`](GUIDE-MAXDRAKE59.html) sous ce nom explicite pour qu'il saute aux yeux une fois le zip extrait). Tout doit rester dans le même dossier après extraction — ce n'est pas un simple exécutable autonome.
+2. **Un code d'invitation**, généré **juste avant l'envoi** (il expire — ne le générez pas la veille), transmis par un canal séparé du fichier ZIP par simple prudence :
    ```
    ssh -i ~/.ssh/gamesavehub_nas -p 9222 stevenpwlk@192.168.1.73
    /Volume2/@apps/DockerEngine/dockerd/bin/docker run --rm \
