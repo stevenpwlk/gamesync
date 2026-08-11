@@ -21,11 +21,22 @@ avec accord explicite avant toute installation, tâche planifiée ou écriture W
 
 ## Installation
 
-- [ ] `GameSaveHub-Setup.exe` installe avec succès sur un PC sans installation
-      préexistante (service `Running`/`Automatic (Delayed Start)`, raccourci créé,
-      tâche planifiée `GameSaveHubUpdater` visible dans le Planificateur de tâches).
-- [ ] Installé par-dessus une installation `0.4.0-pilot` existante : identité CNG,
-      pseudo enregistré et `managed-slot.json` préservés (pas de ré-enrôlement).
+- [x] `GameSaveHub-Setup.exe` installe avec succès (2026-08-11, PC-STEVEN, poste pilote
+      déjà en production — accord explicite obtenu, sauvegarde de `%ProgramData%\GameSaveHub`
+      faite avant). L'exécutable ne s'élève pas tout seul : il faut le relancer avec
+      élévation explicite (`Start-Process -Verb RunAs`), noté ici pour la prochaine fois.
+      Vérifié après coup : service `GameSaveHubClient` `Running`/`Automatic`, raccourci
+      Démarrer créé, tâche planifiée `GameSaveHubUpdater` présente et correctement
+      configurée (`schtasks /Query /V` élevé : `\GameSaveHubUpdater`, exécute `"C:\Program
+      Files\GameSaveHub\GameSaveHub-Setup.exe" --auto-update`, compte `Système`, répétition
+      toutes les 6 h) — invisible depuis un `Get-ScheduledTask` non élevé à cause de son ACL
+      SYSTEM, ce n'est pas un défaut.
+- [x] Installé par-dessus l'installation pilote existante (Lot 2) : `client-state.json` et
+      `managed-slot.json` strictement identiques avant/après (`diff` sans sortie) — deviceId
+      `79fd2323-53c0-45fc-9dc0-e3e7720922d7`, pseudo `Stevenpwlk` préservés, pas de
+      ré-enrôlement. Confirmé en direct via `home-context` sur le tube nommé : service sain,
+      monde principal `Shlags1` correctement identifié, `managedSlotStatus` cohérent.
+      `%ProgramData%\GameSaveHub\appsettings.local.json` écrit, `VERSION` = `0.5.0`.
 
 ## Mise à jour silencieuse
 
