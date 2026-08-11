@@ -1,29 +1,40 @@
+using System.Diagnostics;
 using System.Runtime.Versioning;
+using System.Security.Principal;
 using System.ServiceProcess;
 using GameSaveHub.Client.Orchestration;
+using Microsoft.Win32;
 
 namespace GameSaveHub.Client.Setup;
 
 [SupportedOSPlatform("windows")]
 public static class Installer
 {
-    private const string ServiceName = "GameSaveHubClient";
+    private const string ServiceName = SetupPaths.ServiceName;
 
     public static async Task<int> RunAsync(string serverBaseUrl, CancellationToken cancellationToken)
     {
-        var installRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "GameSaveHub", "Client");
+        var installRoot = SetupPaths.InstallRoot;
         var serviceRoot = Path.Combine(installRoot, "Service");
         var appRoot = Path.Combine(installRoot, "App");
-        var programDataRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "GameSaveHub");
+        var programDataRoot = SetupPaths.ProgramDataRoot;
 
-        var principal = new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent());
-        if (!principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator))
+        var principal = new WindowsPrincipal(WindowsIdentity.GetCurrent());
+        if (!principal.IsInRole(WindowsBuiltInRole.Administrator))
             throw new InvalidOperationException("L'installation doit être lancée en tant qu'administrateur.");
 
-        var sid = System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value
-            ?? throw new InvalidOperationException("Identité Windows introuvable.");
+        // Le compte à enregistrer est celui du joueur assis devant le PC, pas celui du
+        // processus d'installation élevé : une élévation UAC par un autre compte
+        // administrateur enregistrerait le mauvais profil WGS.
+        var interactiveUser = ResolveInteractiveUserName();
+        var sid = TranslateToSid(interactiveUser);
         if (ServiceAccountGuard.IsReservedAccount(sid))
             throw new InvalidOperationException("Le compte joueur ne peut pas être LocalSystem/LocalService/NetworkService.");
+        var localAppData = ResolveLocalAppData(interactiveUser, sid);
+
+        Console.WriteLine($"Utilisateur joueur : {interactiveUser}");
+        Console.WriteLine($"SID joueur         : {sid}");
+        Console.WriteLine($"Profil AppData     : {localAppData}");
 
         using (var existing = ServiceController.GetServices().FirstOrDefault(s => s.ServiceName == ServiceName))
         {
@@ -40,6 +51,11 @@ public static class Installer
             }
         }
 
+        // État du verrou d'écriture AVANT cette installation, relu à ses deux emplacements
+        // possibles : le nouveau (%ProgramData%) et celui du script PowerShell historique.
+        var previousGate = MachineConfig.ReadWriteGate(SetupPaths.MachineConfigPath)
+            ?? MachineConfig.ReadWriteGate(SetupPaths.LegacyMachineConfigPath);
+
         Directory.CreateDirectory(serviceRoot);
         Directory.CreateDirectory(appRoot);
         Directory.CreateDirectory(programDataRoot);
@@ -47,11 +63,19 @@ public static class Installer
         var payloadRoot = Path.Combine(AppContext.BaseDirectory, "payload");
         CopyDirectory(Path.Combine(payloadRoot, "Service"), serviceRoot);
         CopyDirectory(Path.Combine(payloadRoot, "App"), appRoot);
+        WriteInstalledVersion(Path.Combine(payloadRoot, "VERSION"));
 
-        var serviceExe = Path.Combine(serviceRoot, "GameSaveHub.Client.Service.exe");
-        var appExe = Path.Combine(appRoot, "GameSaveHub.Client.App.exe");
+        var serviceExe = SetupPaths.ServiceExePath(installRoot);
+        var appExe = SetupPaths.AppExePath(installRoot);
         if (!File.Exists(serviceExe)) throw new InvalidOperationException($"EXE service absent : {serviceExe}");
         if (!File.Exists(appExe)) throw new InvalidOperationException($"EXE application absent : {appExe}");
+
+        // Cet exécutable ne propose pas de commutateur d'ouverture du verrou : il installe
+        // le package STANDARD. Sur une réinstallation, la valeur déjà en place est reprise
+        // telle quelle plutôt que refermée en silence — c'est la seule façon de ne pas
+        // casser un poste pilote au premier passage de l'installateur unique.
+        var enableWgsTransfer = previousGate ?? false;
+        MachineConfig.Write(SetupPaths.MachineConfigPath, sid, localAppData, serverBaseUrl, enableWgsTransfer);
 
         var managedSlotAlreadyBound = File.Exists(Path.Combine(programDataRoot, "managed-slot.json"));
 
@@ -62,19 +86,121 @@ public static class Installer
             service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(20));
         }
 
+        // « Running » côté SCM ne prouve pas que le service fonctionne : son PipeServerWorker
+        // peut avoir échoué au démarrage (RegisteredUserSid absent, par exemple) sans que le
+        // processus s'arrête. Seule une réponse sur le tube nommé le prouve.
+        if (!await SetupPipeClient.IsServiceAnsweringAsync(TimeSpan.FromSeconds(15), cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "Le service a démarré mais ne répond pas sur son tube nommé « GameSaveHub.Client » dans les 15 s. " +
+                "Installation interrompue : consultez le journal d'événements Windows (source GameSaveHubClient).");
+        }
+
         CreateStartMenuShortcut(appExe, appRoot);
-        ScheduledTaskManager.Register(Path.Combine(AppContext.BaseDirectory, "GameSaveHub-Setup.exe"));
+
+        // La tâche planifiée doit viser une copie stable de l'installateur : l'exécutable
+        // lancé par le joueur est en général dans son dossier Téléchargements, qu'il videra.
+        var installedSetupExe = CopySelfToInstallRoot();
+        ScheduledTaskManager.Register(installedSetupExe);
 
         Console.WriteLine();
         Console.WriteLine("INSTALLATION RÉUSSIE");
-        Console.WriteLine($"Service : {ServiceName} / Running");
+        Console.WriteLine($"Service : {ServiceName} / Running (tube nommé opérationnel)");
+        Console.WriteLine($"Version installée : {ReadPayloadVersion(Path.Combine(payloadRoot, "VERSION"))}");
         Console.WriteLine($"Application : {appExe}");
+        Console.WriteLine($"Configuration machine : {SetupPaths.MachineConfigPath}");
+        Console.WriteLine($"Mise à jour automatique : {installedSetupExe} --auto-update");
+        Console.WriteLine(enableWgsTransfer
+            ? "Écriture des sauvegardes : ACTIVÉE sur ce PC (EnableWgsTransfer=true)."
+            : "Écriture des sauvegardes : DÉSACTIVÉE (EnableWgsTransfer=false).");
+        if (previousGate is not null && previousGate.Value)
+        {
+            Console.WriteLine("Verrou d'écriture : valeur ouverte conservée depuis l'installation précédente.");
+        }
         Console.WriteLine(managedSlotAlreadyBound
             ? "Slot local permanent : déjà enregistré sur ce PC (conservé lors de cette installation)."
             : "Slot local permanent : pas encore configuré. L'application proposera la configuration initiale.");
 
-        await Task.CompletedTask;
         return 0;
+    }
+
+    /// <summary>
+    /// Nom du compte Windows réellement connecté, via la même source que le script
+    /// PowerShell historique (<c>Win32_ComputerSystem.UserName</c>). Passe par
+    /// <c>powershell.exe</c> plutôt que par <c>System.Management</c> : ce paquet embarque
+    /// des dépendances natives (WMI interop) dont l'extraction dans un exécutable
+    /// mono-fichier auto-contenu est une source connue d'échecs au premier lancement,
+    /// alors que <c>powershell.exe</c> est présent sur toute installation de Windows 11.
+    /// </summary>
+    private static string ResolveInteractiveUserName()
+    {
+        using var process = Process.Start(new ProcessStartInfo(
+            "powershell.exe",
+            "-NoProfile -NonInteractive -Command \"(Get-CimInstance Win32_ComputerSystem).UserName\"")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        }) ?? throw new InvalidOperationException("Impossible de démarrer powershell.exe pour identifier l'utilisateur interactif.");
+        var output = process.StandardOutput.ReadToEnd().Trim();
+        process.WaitForExit();
+        if (process.ExitCode != 0 || string.IsNullOrWhiteSpace(output))
+        {
+            throw new InvalidOperationException(
+                "Aucun utilisateur Windows interactif détecté : ouvrez une session sur le compte du joueur avant d'installer.");
+        }
+        return output;
+    }
+
+    private static string TranslateToSid(string userName)
+    {
+        try
+        {
+            return ((SecurityIdentifier)new NTAccount(userName).Translate(typeof(SecurityIdentifier))).Value;
+        }
+        catch (IdentityNotMappedException)
+        {
+            throw new InvalidOperationException($"Compte Windows introuvable : {userName}");
+        }
+    }
+
+    private static string ResolveLocalAppData(string userName, string sid)
+    {
+        using var key = Registry.LocalMachine.OpenSubKey(
+            $@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\{sid}");
+        var profilePath = key?.GetValue("ProfileImagePath", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+        if (string.IsNullOrWhiteSpace(profilePath))
+            throw new InvalidOperationException($"Profil Windows introuvable dans le registre pour {userName} ({sid}).");
+        var localAppData = Path.Combine(Environment.ExpandEnvironmentVariables(profilePath), "AppData", "Local");
+        if (!Directory.Exists(localAppData))
+            throw new InvalidOperationException($"AppData\\Local introuvable pour {userName} : {localAppData}");
+        return localAppData;
+    }
+
+    /// <summary>
+    /// Écrit <c>%ProgramFiles%\GameSaveHub\Client\VERSION</c>, que l'updater relit pour
+    /// décider s'il y a quelque chose à installer. Sans ce fichier, chaque exécution de
+    /// <c>--auto-update</c> retéléchargeait et rebasculait la version déjà en place.
+    /// </summary>
+    private static void WriteInstalledVersion(string payloadVersionPath) =>
+        File.WriteAllText(SetupPaths.InstalledVersionPath, ReadPayloadVersion(payloadVersionPath));
+
+    private static string ReadPayloadVersion(string payloadVersionPath)
+    {
+        if (!File.Exists(payloadVersionPath)) return SetupPaths.CurrentVersion;
+        var version = File.ReadAllText(payloadVersionPath).Trim();
+        return string.IsNullOrWhiteSpace(version) ? SetupPaths.CurrentVersion : version;
+    }
+
+    private static string CopySelfToInstallRoot()
+    {
+        var source = Environment.ProcessPath
+            ?? throw new InvalidOperationException("Chemin de l'exécutable d'installation introuvable.");
+        var destination = SetupPaths.InstalledSetupExePath;
+        Directory.CreateDirectory(SetupPaths.ProductRoot);
+        if (!string.Equals(Path.GetFullPath(source), Path.GetFullPath(destination), StringComparison.OrdinalIgnoreCase))
+            File.Copy(source, destination, overwrite: true);
+        return destination;
     }
 
     private static void InstallService(string serviceExePath)
@@ -85,7 +211,7 @@ public static class Installer
 
     private static void RunSc(string arguments)
     {
-        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("sc.exe", arguments)
+        using var process = Process.Start(new ProcessStartInfo("sc.exe", arguments)
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,

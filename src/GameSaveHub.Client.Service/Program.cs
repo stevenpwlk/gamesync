@@ -5,7 +5,21 @@ using GameSaveHub.Client.Service;
 using Microsoft.Extensions.Options;
 
 var builder = Host.CreateApplicationBuilder(args);
+// La configuration par machine vit dans %ProgramData%\GameSaveHub, jamais dans le dossier
+// d'installation : celui-ci est renommé en bloc à chaque mise à jour (Client -> Client.old,
+// Client.new -> Client) et emporterait le fichier avec lui, laissant le service sans
+// RegisteredUserSid — donc en échec au démarrage. %ProgramData%\GameSaveHub n'est jamais
+// touché par la bascule, comme managed-slot.json et client-state.json qui y vivent déjà.
+// L'ancien emplacement reste lu en premier, donc surchargé par le nouveau, le temps qu'un
+// poste installé avant le Lot 3 soit migré (la migration est faite par l'updater).
 builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.local.json"), optional: true, reloadOnChange: false);
+builder.Configuration.AddJsonFile(
+    Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "GameSaveHub",
+        "appsettings.local.json"),
+    optional: true,
+    reloadOnChange: false);
 builder.Services.AddWindowsService(options => options.ServiceName = "GameSave Hub Client");
 builder.Services.Configure<ClientServiceOptions>(builder.Configuration.GetSection(ClientServiceOptions.SectionName));
 builder.Services.AddSingleton<ClientStateStore>();
